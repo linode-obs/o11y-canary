@@ -12,8 +12,8 @@ type Monitor interface {
 // Canary represents a single canary with a monitor and targets
 type Canary struct {
 	// should we add more values here? ie. targets
-	m Monitor
-	t Targets
+	//	m Monitor
+	//	t Targets
 }
 
 // Targets holds the canary configurations

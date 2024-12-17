@@ -41,8 +41,8 @@ dockers:
   # https://goreleaser.com/cookbooks/multi-platform-docker-images/#other-things-to-pay-attention-to
   - image_templates:
       # https://goreleaser.com/cookbooks/override-image-name/
-      - "{{ .Env.REGISTRY }}/{{ .Env.IMAGE_NAME }}/{{ .ProjectName }}:{{ .Tag }}"
-      - "{{ .Env.REGISTRY }}/{{ .Env.IMAGE_NAME }}/{{ .ProjectName }}:{{ .Tag }}-amd64"
+      - "ghcr.io/linode-obs/{{ .ProjectName }}:{{ .Tag }}"
+      - "ghcr.io/linode-obs/{{ .ProjectName }}:{{ .Tag }}-amd64"
     use: buildx
     goos: linux
     goarch: amd64
@@ -52,13 +52,13 @@ dockers:
     - "--label=org.opencontainers.image.title={{ .ProjectName }}"
     - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
     - "--label=org.opencontainers.image.version={{ .Version }}"
-    - "--label=org.opencontainers.image.source={{ .Env.REPO }}"
+    - "--label=org.opencontainers.image.source=https://github.linode.com/linode-obs/{{ .ProjectName }}"
     - "--label=org.opencontainers.image.description='o11y platform canary'"
     - "--label=org.opencontainers.image.licenses=MIT"
     - "--platform=linux/amd64"
     dockerfile: "Dockerfile"
   - image_templates:
-      - "{{ .Env.REGISTRY }}/{{ .Env.IMAGE_NAME }}/{{ .ProjectName }}:{{ .Tag }}-linux-arm64"
+      - "ghcr.io/linode-obs/{{ .ProjectName }}:{{ .Tag }}-linux-arm64"
     use: buildx
     goos: linux
     goarch: arm64
@@ -68,7 +68,7 @@ dockers:
     - "--label=org.opencontainers.image.title={{ .ProjectName }}"
     - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
     - "--label=org.opencontainers.image.version={{ .Version }}"
-    - "--label=org.opencontainers.image.source={{ .Env.REPO }}"
+    - "--label=org.opencontainers.image.source=https://github.linode.com/linode-obs/{{ .ProjectName }}"
     - "--label=org.opencontainers.image.description='o11y platform canary'"
     - "--label=org.opencontainers.image.licenses=MIT"
     - "--platform=linux/arm64"
@@ -89,7 +89,7 @@ nfpms:
      maintainer: "SRE O11Y support@linode.com"
      description: |
        o11y platform canary
-     homepage: "{{ .Env.REPO }}"
+     homepage: "https://github.linode.com/linode-obs/{{ .ProjectName }}"
      license: "MIT"
      contents:
      # provided by goreleaser
