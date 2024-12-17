@@ -1,0 +1,28 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+processors:
+extensions:
+  health_check: {}
+exporters:
+  otlphttp/victoriametrics:
+    endpoint: http://vm-singleton:8428/opentelemetry
+    compression: gzip
+    encoding: proto
+    tls:
+      insecure: true
+  debug:
+service:
+  extensions: [health_check]
+  telemetry:
+    metrics:
+      address: "0.0.0.0:8888"
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: []
+      exporters: [otlphttp/victoriametrics]

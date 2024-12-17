@@ -1,0 +1,26 @@
+services:
+  o11y-canary:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.110.0
+    ports:
+      - 4317:4317
+      - 4318:4318
+      - 8888:8888
+    volumes:
+      - ./otel-collector.yaml:/etc/otel-collector.yaml
+    command: ["--config=file:/etc/otel-collector.yaml"]
+  vm-singleton:
+    image: victoriametrics/victoria-metrics:v1.101.0
+    ports:
+      - "8428:8428"
+    volumes:
+      - ./vm-scrape.yaml:/scrape.yaml
+    command:
+      - '-loggerLevel=INFO'
+      - '-promscrape.config=scrape.yaml'
+      - '-selfScrapeInterval=10s'
