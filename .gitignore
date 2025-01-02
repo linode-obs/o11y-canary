@@ -25,3 +25,6 @@ go.work
 
 # goreleaser
 dist/
+
+.vscode
+o11y_canary

@@ -1,0 +1,10 @@
+canary:
+  my_canary_1:
+    type: metrics # assume otlp for everything?
+    # todo - need protocol field? could be otlp or remote write
+    ingest:
+      - metrics-insert.my-cluster.com
+    query:
+      - select-endpoint.my-cluster.com
+    additional_labels:
+      environment: staging
