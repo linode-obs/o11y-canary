@@ -4,6 +4,7 @@ import (
 	"o11y-canary/internal/config"
 	"reflect"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v2"
 )
@@ -22,7 +23,8 @@ canary:
       - select-endpoint.my-cluster.com
     additional_labels:
       environment: staging
-    `
+    interval: 5m
+`
 	var config config.CanariesConfig
 
 	err := yaml.Unmarshal([]byte(yamlInput), &config)
@@ -36,6 +38,7 @@ canary:
 	expectedAdditionalLabels := map[string]string{
 		"environment": "staging",
 	}
+	expectedInterval := 5 * time.Minute
 
 	if config.Canaries["my_canary_1"].Type != expectedType {
 		t.Errorf("Expected '%s', got '%s'", expectedType, config.Canaries["my_canary_1"].Type)
@@ -53,4 +56,7 @@ canary:
 		t.Errorf("Expected '%s', got '%s'", expectedAdditionalLabels, config.Canaries["my_canary_1"].AdditionalLabels)
 	}
 
+	if config.Canaries["my_canary_1"].Interval != expectedInterval {
+		t.Errorf("Expected '%s', got '%s'", expectedInterval, config.Canaries["my_canary_1"].Interval)
+	}
 }
