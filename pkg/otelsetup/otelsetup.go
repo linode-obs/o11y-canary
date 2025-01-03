@@ -61,7 +61,6 @@ func SetupOTelSDK(ctx context.Context, version string) (shutdown func(context.Co
 func InitOTLPMeterProvider(ctx context.Context, res *resource.Resource, conn *grpc.ClientConn) (*metric.MeterProvider, error) {
 	metricExporter, err := otlpmetricgrpc.New(ctx, otlpmetricgrpc.WithGRPCConn(conn))
 	if err != nil {
-		// TODO convert to slog
 		return nil, fmt.Errorf("failed to create metrics exporter: %w", err)
 	}
 

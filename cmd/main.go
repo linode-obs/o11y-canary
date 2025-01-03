@@ -8,6 +8,7 @@ import (
 	"o11y-canary/internal/config"
 	"o11y-canary/pkg/otelsetup"
 	"os"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -20,7 +21,8 @@ var Version = "development"
 
 func main() {
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	defaultLogLevel := "info"
 
@@ -53,20 +55,20 @@ func main() {
 	}
 	defer file.Close()
 
-	var config config.CanariesConfig
+	var canaryConfig config.CanariesConfig
 	decoder := yaml.NewDecoder(file)
-	if err := decoder.Decode(&config); err != nil {
+	if err := decoder.Decode(&canaryConfig); err != nil {
 		slog.Error("Error decoding YAML", "error", err)
-		// TODO - log.fatal equivalent here
+		os.Exit(1)
 	} else {
-		slog.Debug("Configuration loaded successfully", "config", config)
+		slog.Debug("Configuration loaded successfully", "config", canaryConfig)
 	}
 
 	// Set up OpenTelemetry.
 	otelShutdown, err := otelsetup.SetupOTelSDK(ctx, Version)
 	if err != nil {
-		// todo slog fatal?
 		slog.Error("Failed to initialize OpenTelemetry", "error", err)
+		os.Exit(1)
 	}
 	// Handle shutdown properly so nothing leaks.
 	defer func() {
@@ -78,37 +80,47 @@ func main() {
 	slog.Info("Version", "version", Version)
 	otelsetup.InitializeResource(Version)
 
-	// OTLP provider
+	var wg sync.WaitGroup
 
-	// TODO - concurrency, delete this
-	for {
-		// for each canary
-		for canaryName, canaryConfig := range config.Canaries {
-			var c canary.Canary
-			if canaryConfig.Type == "metrics" {
+	for canaryName, canaryConfig := range canaryConfig.Canaries {
+		wg.Add(1) // TODO - correct use of wg?
+		// Start a goroutine for each canary *run* and handle cancellation
+		// that might be wrong use of goroutines too
+		go func(name string, canaryConfig config.CanaryConfig) {
+			for {
+				select {
+				case <-ctx.Done():
+					slog.Info("Shutting down canary", "name", name)
+					return
+				default:
+					slog.Debug("Running canary", "name", name)
+					var c canary.Canary
+					if canaryConfig.Type == "metrics" {
 
-				// Initialize the resource for the canary
-				res := resource.NewWithAttributes(
-					semconv.SchemaURL,
-					semconv.ServiceNameKey.String(canaryName),
-					semconv.ServiceNamespaceKey.String("o11y_canary"),
-					semconv.ServiceVersionKey.String(Version),
-				)
-
-				// TODO - pass through additional labels too
-				// write to ingest
-				c.Write(ctx, res, canaryConfig.Ingest)
-
-				// query from query URL
-
-				// publish results of expected diff (comparator)
-
-				// repeat on interval
-				// TODO - concurrency
-				time.Sleep(canaryConfig.Interval)
+						// Initialize the resource for the canary
+						res := resource.NewWithAttributes(
+							semconv.SchemaURL,
+							semconv.ServiceNameKey.String(canaryName),
+							semconv.ServiceNamespaceKey.String("o11y_canary"),
+							semconv.ServiceVersionKey.String(Version),
+						)
+						// TODO - pass through additional labels too
+						// write to ingest
+						// TODO - return err for each func
+						c.Write(ctx, res, canaryConfig.Ingest)
+						// query from query URL
+						c.Query()
+						// publish results of expected diff (comparator)
+						// make channel for publish results?
+						c.Publish()
+					}
+					// repeat on interval
+					// this is goroutine safe right?
+					time.Sleep(canaryConfig.Interval)
+				}
 			}
-
-		}
+		}(canaryName, canaryConfig)
 	}
 
+	wg.Wait()
 }
