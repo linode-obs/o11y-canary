@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	"golang.org/x/exp/rand"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // Monitor is an interface that defines methods for canary operations
@@ -45,9 +46,8 @@ func (c *Canary) Write(ctx context.Context, res *resource.Resource, targets []st
 		// best place to make the conn is here?
 		// Create a gRPC connection to the OTLP endpoint
 
-		// TODO use non-deprecated package and newClient
 		// TODO TLS support
-		conn, err := grpc.DialContext(ctx, target, grpc.WithInsecure())
+		conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
 			log.Fatalf("Failed to create gRPC connection: %v", err)
 		}

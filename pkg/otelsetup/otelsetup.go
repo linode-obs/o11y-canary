@@ -56,8 +56,8 @@ func SetupOTelSDK(ctx context.Context, version string) (shutdown func(context.Co
 	return
 }
 
-// https://github.com/open-telemetry/opentelemetry-go-contrib/blob/main/examples/otel-collector/main.go
 // InitOTLPMeterProvider initializes an OTLP exporter, and configures the corresponding meter provider for canaries
+// https://github.com/open-telemetry/opentelemetry-go-contrib/blob/main/examples/otel-collector/main.go
 func InitOTLPMeterProvider(ctx context.Context, res *resource.Resource, conn *grpc.ClientConn) (*metric.MeterProvider, error) {
 	metricExporter, err := otlpmetricgrpc.New(ctx, otlpmetricgrpc.WithGRPCConn(conn))
 	if err != nil {
