@@ -2,7 +2,7 @@ package canary
 
 import (
 	"context"
-	"log"
+	"fmt"
 	"log/slog"
 	"o11y-canary/internal/config"
 	"o11y-canary/pkg/otelsetup"
@@ -38,7 +38,7 @@ type Targets struct {
 // Write performs a write operation
 // TODO look at loki canary logic again
 // https://github.com/grafana/loki/blob/main/pkg/canary/writer/push.go
-func (c *Canary) Write(ctx context.Context, res *resource.Resource, targets []string) {
+func (c *Canary) Write(ctx context.Context, res *resource.Resource, targets []string) (err error) {
 
 	// get address to write to from config
 	for _, target := range targets {
@@ -49,7 +49,7 @@ func (c *Canary) Write(ctx context.Context, res *resource.Resource, targets []st
 		// TODO TLS support
 		conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
-			log.Fatalf("Failed to create gRPC connection: %v", err)
+			return fmt.Errorf("Failed to create gRPC connection: %v", err)
 		}
 		defer conn.Close()
 
@@ -72,8 +72,7 @@ func (c *Canary) Write(ctx context.Context, res *resource.Resource, targets []st
 		}()
 
 		if err != nil {
-			slog.Error("Failed to create metric for write", "error", err)
-			return
+			return fmt.Errorf("Failed to create metric for write: %v", err)
 		}
 
 		// generate metrics
@@ -92,15 +91,20 @@ func (c *Canary) Write(ctx context.Context, res *resource.Resource, targets []st
 		slog.Debug("Writing metric", "ingest", target)
 
 	}
+	return nil
 }
 
 // Query performs a query operation
-func (c *Canary) Query() {
+func (c *Canary) Query() (err error) {
+
+	return nil
 }
 
 // Publish writes out new values to the /metrics interface.
-func (c *Canary) Publish() {
+func (c *Canary) Publish() (err error) {
 	// method to write out new values to the /metrics interface
 	// perhaps return meter type?
 	// https://pkg.go.dev/go.opentelemetry.io/otel/metric#MeterProvider
+
+	return nil
 }

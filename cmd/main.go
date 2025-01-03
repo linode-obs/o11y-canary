@@ -106,13 +106,23 @@ func main() {
 						)
 						// TODO - pass through additional labels too
 						// write to ingest
-						// TODO - return err for each func
-						c.Write(ctx, res, canaryConfig.Ingest)
+						err := c.Write(ctx, res, canaryConfig.Ingest)
+						if err != nil {
+							slog.Error("Failed to write metrics", "error", err)
+						}
+
 						// query from query URL
-						c.Query()
+						err = c.Query()
+						if err != nil {
+							slog.Error("Failed to query metrics", "error", err)
+						}
+
 						// publish results of expected diff (comparator)
 						// make channel for publish results?
-						c.Publish()
+						err = c.Publish()
+						if err != nil {
+							slog.Error("Failed to publish metric query results", "error", err)
+						}
 					}
 					// repeat on interval
 					// this is goroutine safe right?
