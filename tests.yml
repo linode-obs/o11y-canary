@@ -32,7 +32,7 @@ testcases:
         script: |
           sleep 120; curl -G http://localhost:8428/api/v1/query \
           -H "Content-Type: application/json" \
-          --data-urlencode 'query=o11y_canary_canaried_metric_total{canary="true"}'=
+          --data-urlencode 'query=o11y_canary_canaried_metric_total{canary="true"}'
         assertions:
         # tried systemoutjson but had trouble parsing exact path
         - result.code ShouldEqual 0
