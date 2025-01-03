@@ -69,7 +69,6 @@ func InitOTLPMeterProvider(ctx context.Context, res *resource.Resource, conn *gr
 		metric.WithResource(res),
 	)
 
-	// TODO - need deferred shutdown somewhere?
 	return meterProvider, nil
 }
 

@@ -49,7 +49,7 @@ func (c *Canary) Write(ctx context.Context, res *resource.Resource, targets []st
 		// TODO TLS support
 		conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
-			return fmt.Errorf("Failed to create gRPC connection: %v", err)
+			return fmt.Errorf("failed to create gRPC connection: %v", err)
 		}
 		defer conn.Close()
 
@@ -72,7 +72,7 @@ func (c *Canary) Write(ctx context.Context, res *resource.Resource, targets []st
 		}()
 
 		if err != nil {
-			return fmt.Errorf("Failed to create metric for write: %v", err)
+			return fmt.Errorf("failed to create metric for write: %v", err)
 		}
 
 		// generate metrics
