@@ -1,0 +1,46 @@
+name: o11y-canary
+vars:
+  vicmecHost: "http://localhost:8428"
+testcases:
+  - name: docker compose up
+    steps:
+      - type: exec
+        script: docker compose up --build -d --wait --force-recreate
+
+  - name: wait for services
+    steps:
+      - type: http
+        url: "{{.vicmecHost}}/metrics"
+        method: GET
+        retries: 10
+        delay: 2
+        assertions:
+          - result.statuscode ShouldEqual 200
+      - type: http
+        url: "http://localhost:8888/metrics"
+        method: GET
+        retries: 10
+        delay: 2
+        assertions:
+          - result.statuscode ShouldEqual 200
+
+# too much trouble with venom's http module, resorted to curl
+  - name: Check for metric write() existence
+    steps:
+      - type: exec
+      # don't think retries/delay are supported in exec steps
+        script: |
+          sleep 120; curl -G http://localhost:8428/api/v1/query \
+          -H "Content-Type: application/json" \
+          --data-urlencode 'query=o11y_canary_canaried_metric_total{canary="true"}'=
+        assertions:
+        # tried systemoutjson but had trouble parsing exact path
+        - result.code ShouldEqual 0
+        - result.systemout ShouldContainSubstring '"status":"success"'
+        - result.systemout ShouldContainSubstring "__name__":"o11y_canary_canaried_metric_total"
+        - result.systemout ShouldContainSubstring "service.name":"my_canary_1"
+
+  - name: clean up docker resources
+    steps:
+      - type: exec
+        script: docker compose down --volumes --remove-orphans

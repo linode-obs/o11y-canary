@@ -47,3 +47,7 @@ go build o11y-canary.go
 ## Contributors
 
 Contributions welcome! Make sure to `pre-commit install`.
+
+### Testing
+
+[Venom](https://github.com/ovh/venom) is used for integration tests. Run `sudo venom run tests.yml` to spin up the docker compose stack.
