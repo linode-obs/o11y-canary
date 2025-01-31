@@ -83,30 +83,44 @@ func main() {
 	var wg sync.WaitGroup
 
 	for canaryName, canaryConfig := range canaryConfig.Canaries {
-		wg.Add(1) // TODO - correct use of wg?
+		wg.Add(1)
 		// Start a goroutine for each canary *run* and handle cancellation
-		// that might be wrong use of goroutines too
 		go func(name string, canaryConfig config.CanaryConfig) {
+			defer wg.Done()
+
+			res := resource.NewWithAttributes(
+				semconv.SchemaURL,
+				semconv.ServiceNameKey.String(canaryName),
+				semconv.ServiceNamespaceKey.String(otelsetup.ServiceString),
+				semconv.ServiceVersionKey.String(Version),
+			)
+
+			var c canary.Canary
+
+			// Initialize client setup outside the ticker loop
+			// Each canary gets its own meterProvider (+ grpc client), cleanup func, and single gauge metric
+			meterProvider, cleanup, gauge, err := c.InitWriteClient(ctx, res, canaryConfig.Ingest[0], canaryConfig.Interval, canaryConfig.Timeout)
+			if err != nil {
+				slog.Error("Failed to initialize metric client", "error", err)
+				return
+			}
+			defer cleanup()
+
+			// use ticker for goroutine compatibility
+			ticker := time.NewTicker(canaryConfig.Interval)
+			defer ticker.Stop()
+
 			for {
 				select {
 				case <-ctx.Done():
 					slog.Info("Shutting down canary", "name", name)
 					return
-				default:
+				case <-ticker.C:
 					slog.Debug("Running canary", "name", name)
-					var c canary.Canary
-					if canaryConfig.Type == "metrics" {
 
-						// Initialize the resource for the canary
-						res := resource.NewWithAttributes(
-							semconv.SchemaURL,
-							semconv.ServiceNameKey.String(canaryName),
-							semconv.ServiceNamespaceKey.String(otelsetup.ServiceString),
-							semconv.ServiceVersionKey.String(Version),
-						)
-						// TODO - pass through additional labels too
+					if canaryConfig.Type == "metrics" {
 						// write to ingest
-						err := c.Write(ctx, res, canaryConfig.Ingest)
+						err := c.Write(ctx, meterProvider, canaryConfig.Ingest, gauge)
 						if err != nil {
 							slog.Error("Failed to write metrics", "error", err)
 						}
@@ -123,14 +137,11 @@ func main() {
 						if err != nil {
 							slog.Error("Failed to publish metric query results", "error", err)
 						}
+
 					}
-					// repeat on interval
-					// this is goroutine safe right?
-					time.Sleep(canaryConfig.Interval)
 				}
 			}
 		}(canaryName, canaryConfig)
 	}
-
 	wg.Wait()
 }

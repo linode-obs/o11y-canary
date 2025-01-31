@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"o11y-canary/internal/config"
 	"o11y-canary/pkg/otelsetup"
+	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -35,59 +36,61 @@ type Targets struct {
 	Config config.CanariesConfig
 }
 
-// Write performs a write operation
-// TODO look at loki canary logic again
-// https://github.com/grafana/loki/blob/main/pkg/canary/writer/push.go
-func (c *Canary) Write(ctx context.Context, res *resource.Resource, targets []string) (err error) {
+// InitWriteClient method for Canary to provide grpc client, meterprovider (with shutdown func), and metrics for later writing
+func (c *Canary) InitWriteClient(ctx context.Context, res *resource.Resource, target string, interval time.Duration, timeout time.Duration) (metric.MeterProvider, func(), metric.Float64Gauge, error) {
 
-	// get address to write to from config
+	// TODO - TLS support
+	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to create gRPC connection: %v", err)
+	}
+
+	// TODO - dynamic CLI flags for connection, target, tls, etc
+	meterProvider, err := otelsetup.InitOTLPMeterProvider(ctx, res, conn, timeout)
+	if err != nil {
+		slog.Error("Failed to create meter provider", "error", err)
+		conn.Close()
+		return nil, nil, nil, err
+	}
+
+	// Return shutdown function for cleanup
+	cleanup := func() {
+		if shutdownErr := meterProvider.Shutdown(ctx); shutdownErr != nil {
+			slog.Error("Failed to shut down meter provider", "target", target, "error", shutdownErr)
+		}
+		conn.Close()
+	}
+
+	meter := meterProvider.Meter("todo_change_this_to_canary_name")
+	gauge, err := meter.Float64Gauge(
+		"o11y_canary_canaried_metric_total",
+		metric.WithDescription("o11y canary test metric for canarying"),
+	)
+
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to create metric for write: %v", err)
+	}
+
+	return meterProvider, cleanup, gauge, nil
+}
+
+// Write performs a write operation for a counter
+func (c *Canary) Write(ctx context.Context, meterProvider metric.MeterProvider, targets []string, gauge metric.Float64Gauge) (err error) {
 	for _, target := range targets {
 
-		// best place to make the conn is here?
-		// Create a gRPC connection to the OTLP endpoint
-
-		// TODO TLS support
-		conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		if err != nil {
-			return fmt.Errorf("failed to create gRPC connection: %v", err)
-		}
-		defer conn.Close()
-
-		// TODO - dynamic CLI flags for connection, target, tls, etc
-		meterProvider, err := otelsetup.InitOTLPMeterProvider(ctx, res, conn)
-		if err != nil {
-			slog.Error("Failed to create meter provider", "error", err)
-		}
-		// now use provider to make new metrics
-
-		meter := meterProvider.Meter("todo_change_this_to_canary_name")
-		counter, err := meter.Int64Counter(
-			"o11y_canary_canaried_metric_total",
-			metric.WithDescription("o11y canary test metric for canarying"),
-		)
-		defer func() {
-			if shutdownErr := meterProvider.Shutdown(ctx); shutdownErr != nil {
-				slog.Error("Failed to shut down meter provider", "target", target, "error", shutdownErr)
-			}
-		}()
-
-		if err != nil {
-			return fmt.Errorf("failed to create metric for write: %v", err)
-		}
-
 		// generate metrics
-		randomValue := int64(rand.Intn(100)) // random data for now, probably don't need to randomize the value just yet?
-		// look at loki canary logic again
+		randomValue := float64(rand.Intn(100)) // does this need to be random values? i guess why not for later fetching
+		// TODO look at loki canary logic again for their values
 
-		// todo use something like loki canary streams to help identify the time series by labels?
+		// TOO use something like loki canary streams to help identify the time series by labels?
 		labels := []attribute.KeyValue{
 			attribute.String("target", target),
 			attribute.String("canary", "true"),
 		}
 
-		// Record the metric
-		counter.Add(ctx, randomValue, metric.WithAttributes(labels...))
+		gauge.Record(ctx, randomValue, metric.WithAttributes(labels...))
 
+		// TODO canonical log here?
 		slog.Debug("Writing metric", "ingest", target)
 
 	}

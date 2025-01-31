@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
@@ -61,14 +62,25 @@ func SetupOTelSDK(ctx context.Context, version string) (shutdown func(context.Co
 
 // InitOTLPMeterProvider initializes an OTLP exporter, and configures the corresponding meter provider for canaries
 // https://github.com/open-telemetry/opentelemetry-go-contrib/blob/main/examples/otel-collector/main.go
-func InitOTLPMeterProvider(ctx context.Context, res *resource.Resource, conn *grpc.ClientConn) (*metric.MeterProvider, error) {
+func InitOTLPMeterProvider(ctx context.Context, res *resource.Resource, conn *grpc.ClientConn, timeout time.Duration) (*metric.MeterProvider, error) {
 	metricExporter, err := otlpmetricgrpc.New(ctx, otlpmetricgrpc.WithGRPCConn(conn))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create metrics exporter: %w", err)
 	}
 
+	// small buffer to prevent thundering herd as"The collect and export time are not counted towards the interval between attempts."
+	buffer := 5 * time.Second
+	interval := timeout + buffer
+
+	// PeriodicReader helps prevent managing forceflush by hand
+	reader := metric.NewPeriodicReader(
+		metricExporter,
+		metric.WithInterval(interval),
+		metric.WithTimeout(timeout),
+	)
+
 	meterProvider := metric.NewMeterProvider(
-		metric.WithReader(metric.NewPeriodicReader(metricExporter)),
+		metric.WithReader(reader),
 		metric.WithResource(res),
 	)
 
