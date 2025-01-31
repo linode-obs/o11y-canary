@@ -101,7 +101,7 @@ func main() {
 						res := resource.NewWithAttributes(
 							semconv.SchemaURL,
 							semconv.ServiceNameKey.String(canaryName),
-							semconv.ServiceNamespaceKey.String("o11y_canary"),
+							semconv.ServiceNamespaceKey.String("o11y-canary"),
 							semconv.ServiceVersionKey.String(Version),
 						)
 						// TODO - pass through additional labels too

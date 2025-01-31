@@ -14,11 +14,13 @@ import (
 	"google.golang.org/grpc"
 )
 
+var serviceString = "o11y-canary"
+
 // Meter is a package wide service description variable for metrics
-var Meter = otel.Meter("o11y_canary")
+var Meter = otel.Meter(serviceString)
 
 // Tracer is a package wide service description variable for traces
-var Tracer = otel.Tracer("o11y_canary")
+var Tracer = otel.Tracer(serviceString)
 
 // SetupOTelSDK implements various telemetry providers for the o11y-canary itself, not any subsequent canary instructions
 func SetupOTelSDK(ctx context.Context, version string) (shutdown func(context.Context) error, err error) {
@@ -76,8 +78,8 @@ func InitOTLPMeterProvider(ctx context.Context, res *resource.Resource, conn *gr
 func InitializeResource(version string) *resource.Resource {
 	return resource.NewWithAttributes(
 		semconv.SchemaURL,
-		semconv.ServiceNameKey.String("o11y_canary"), // Explicit service name
-		semconv.ServiceNamespaceKey.String("o11y_canary"),
+		semconv.ServiceNameKey.String(serviceString), // Explicit service name
+		semconv.ServiceNamespaceKey.String(serviceString),
 		semconv.ServiceVersionKey.String(version),
 	)
 }

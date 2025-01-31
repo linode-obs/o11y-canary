@@ -27,7 +27,7 @@ go.work
 dist/
 
 .vscode
-o11y_canary
+o11y-canary
 
 # venom logs
 venom*log
