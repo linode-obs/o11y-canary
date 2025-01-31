@@ -14,3 +14,4 @@ canary:
     # TODO - break up interval into ingest and query?
     # s/ingest/write ? ingest hard to understand
     interval: 5s
+    timeout: 10s
