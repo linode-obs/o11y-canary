@@ -5,6 +5,11 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8080:8080"
+    volumes:
+      - ./test/config.yaml:/config.yaml
+    command:
+      - -log.level=debug
+      - -config=/config.yaml
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.110.0
     ports:

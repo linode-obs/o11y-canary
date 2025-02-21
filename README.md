@@ -11,14 +11,6 @@ Planned Features:
 
 ## Installation
 
-### Docker
-
-```console
-sudo docker run \
---privileged \
-ghcr.io/linode-obs/o11y-canary
-```
-
 ### Binary
 
 ```bash
@@ -47,3 +39,17 @@ go build o11y-canary.go
 ## Contributors
 
 Contributions welcome! Make sure to `pre-commit install`.
+
+### Local Development
+
+#### Docker
+
+```console
+ sudo docker compose up -d --build --force-recreate
+```
+
+Then access the [VictoriaMetrics UI](http://localhost:8428/vmui). Canary metrics will appear under `o11y_canary_canaried_metric_total`.
+
+### Testing
+
+[Venom](https://github.com/ovh/venom) is used for integration tests. Run `sudo venom run tests.yml` to spin up the docker compose stack.

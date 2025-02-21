@@ -4,53 +4,70 @@ import (
 	"o11y-canary/internal/config"
 	"reflect"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v2"
 )
 
-func TestSingleCanaryConfig(t *testing.T) {
-	// Ensure canary config is parsed correctly for one canary
-	// TODO convert to table test
-	// TODO test multiple canaries in the same config file
+func TestCanariesConfig(t *testing.T) {
 	yamlInput := `
 canary:
   my_canary_1:
     type: otlp
     ingest:
-      - metrics-insert.my-cluster.com
+    - metrics-insert.my-cluster.com
     query:
-      - select-endpoint.my-cluster.com
+    - select-endpoint.my-cluster.com
     additional_labels:
-      environment: staging
-    `
-	var config config.CanariesConfig
+        environment: staging
+    interval: 5m
+  my_canary_2:
+    type: prometheus
+    ingest:
+    - metrics-insert.my-cluster.com
+    query:
+    - select-endpoint.my-cluster.com
+    additional_labels:
+        environment: production
+    interval: 10m
+`
+	var canaryConfig config.CanariesConfig
 
-	err := yaml.Unmarshal([]byte(yamlInput), &config)
+	err := yaml.Unmarshal([]byte(yamlInput), &canaryConfig)
 	if err != nil {
 		t.Fatalf("Failed to unmarshal YAML: %v", err)
 	}
 
-	expectedType := "otlp"
-	expectedIngest := "metrics-insert.my-cluster.com"
-	expectedQuery := "select-endpoint.my-cluster.com"
-	expectedAdditionalLabels := map[string]string{
-		"environment": "staging",
+	expectedCanaries := map[string]config.CanaryConfig{
+		"my_canary_1": {
+			Type: "otlp",
+			Ingest: []string{
+				"metrics-insert.my-cluster.com",
+			},
+			Query: []string{
+				"select-endpoint.my-cluster.com",
+			},
+			AdditionalLabels: map[string]string{
+				"environment": "staging",
+			},
+			Interval: 5 * time.Minute,
+		},
+		"my_canary_2": {
+			Type: "prometheus",
+			Ingest: []string{
+				"metrics-insert.my-cluster.com",
+			},
+			Query: []string{
+				"select-endpoint.my-cluster.com",
+			},
+			AdditionalLabels: map[string]string{
+				"environment": "production",
+			},
+			Interval: 10 * time.Minute,
+		},
 	}
 
-	if config.Canaries["my_canary_1"].Type != expectedType {
-		t.Errorf("Expected '%s', got '%s'", expectedType, config.Canaries["my_canary_1"].Type)
+	if !reflect.DeepEqual(canaryConfig.Canaries, expectedCanaries) {
+		t.Errorf("Expected '%v', got '%v'", expectedCanaries, canaryConfig.Canaries)
 	}
-
-	if config.Canaries["my_canary_1"].Ingest[0] != expectedIngest {
-		t.Errorf("Expected '%s', got '%s'", expectedIngest, config.Canaries["my_canary_1"].Ingest[0])
-	}
-
-	if config.Canaries["my_canary_1"].Query[0] != expectedQuery {
-		t.Errorf("Expected '%s', got '%s'", expectedQuery, config.Canaries["my_canary_1"].Query[0])
-	}
-
-	if !reflect.DeepEqual(config.Canaries["my_canary_1"].AdditionalLabels, expectedAdditionalLabels) {
-		t.Errorf("Expected '%s', got '%s'", expectedAdditionalLabels, config.Canaries["my_canary_1"].AdditionalLabels)
-	}
-
 }

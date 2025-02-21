@@ -25,3 +25,9 @@ go.work
 
 # goreleaser
 dist/
+
+.vscode
+o11y-canary
+
+# venom logs
+venom*log

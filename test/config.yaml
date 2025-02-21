@@ -1,0 +1,17 @@
+canary:
+  my_canary_1:
+    type: metrics # assume otlp for everything?
+    # todo - need protocol field? could be otlp or remote write
+    # also grpc vs http
+    ingest:
+      - otel-collector:4317
+      # TODO - TLS settings
+    query:
+      - select-endpoint.my-cluster.com
+      # TODO - TLS settings
+    additional_labels:
+      environment: staging
+    # TODO - break up interval into ingest and query?
+    # s/ingest/write ? ingest hard to understand
+    interval: 5s
+    timeout: 10s
