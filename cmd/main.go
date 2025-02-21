@@ -4,6 +4,8 @@ import (
 	"context"
 	"flag"
 	"log/slog"
+	"net/http"
+	"net/http/pprof"
 	"o11y-canary/internal/canary"
 	"o11y-canary/internal/config"
 	"o11y-canary/pkg/otelsetup"
@@ -11,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
 	yaml "gopkg.in/yaml.v2"
@@ -79,6 +83,27 @@ func main() {
 
 	slog.Info("Version", "version", Version)
 	otelsetup.InitializeResource(Version)
+
+	r := mux.NewRouter()
+
+	// pprof boilerplate
+	r.HandleFunc("/debug/pprof/", pprof.Index)
+	r.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	r.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	r.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	r.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	r.HandleFunc("/debug/pprof/allocs", pprof.Handler("allocs").ServeHTTP)
+	r.HandleFunc("/debug/pprof/goroutine", pprof.Handler("goroutine").ServeHTTP)
+
+	r.Handle("/metrics", promhttp.Handler()).Methods("GET")
+
+	go func() {
+		slog.Info("Starting metrics & profiling http server", "port", 8080)
+		if err := http.ListenAndServe(":8080", r); err != nil {
+			slog.Error("Failed to start server", "error", err)
+			os.Exit(1)
+		}
+	}()
 
 	var wg sync.WaitGroup
 
