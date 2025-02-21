@@ -68,7 +68,7 @@ func InitOTLPMeterProvider(ctx context.Context, res *resource.Resource, conn *gr
 		return nil, fmt.Errorf("failed to create metrics exporter: %w", err)
 	}
 
-	// small buffer to prevent thundering herd as"The collect and export time are not counted towards the interval between attempts."
+	// small buffer to prevent thundering herd as "The collect and export time are not counted towards the interval between attempts."
 	buffer := 5 * time.Second
 	interval := timeout + buffer
 
