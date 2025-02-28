@@ -135,6 +135,8 @@ func main() {
 		go func(name string, canaryConfig config.CanaryConfig) {
 			defer wg.Done()
 
+			tracer := otel.Tracer("o11y-canary")
+
 			canaryCtx, canarySpan := tracer.Start(ctx, fmt.Sprintf("canary-%s", name),
 				trace.WithAttributes(
 					attribute.String("canary.name", name),
@@ -183,52 +185,50 @@ func main() {
 					slog.Info(infoMsg, "name", name)
 					canarySpan.End()
 					return
+
 				case <-ticker.C:
-					canarySpan.AddEvent("Running canary check")
+					// start a new trace for each canary op
+					runCtx, runSpan := tracer.Start(canaryCtx, fmt.Sprintf("canary-write-%s", name))
+					runSpan.AddEvent("Running canary check")
 
 					if canaryConfig.Type == "metrics" {
 						// write to ingest
-						err := c.Write(canaryCtx, meterProvider, canaryConfig.Ingest, gauge)
+						err := c.Write(runCtx, meterProvider, canaryConfig.Ingest, gauge)
 						if err != nil {
-							errMsg := "Failed to write metrics"
-							canarySpan.RecordError(err)
-							canarySpan.SetStatus(codes.Error, errMsg)
-							canarySpan.AddEvent(errMsg)
-							slog.Error(errMsg, "error", err)
+							runSpan.RecordError(err)
+							runSpan.SetStatus(codes.Error, "Failed to write metrics")
+							slog.Error("Failed to write metrics", "error", err)
 						} else {
-							canarySpan.AddEvent("Metrics written successfully")
+							runSpan.AddEvent("Metrics written successfully")
 						}
 
 						// query from query URL
 						err = c.Query()
 						if err != nil {
-							errMsg := "Failed to query metrics"
-							canarySpan.RecordError(err)
-							canarySpan.SetStatus(codes.Error, errMsg)
-							canarySpan.AddEvent(errMsg)
-							slog.Error(errMsg, "error", err)
+							runSpan.RecordError(err)
+							runSpan.SetStatus(codes.Error, "Failed to query metrics")
+							slog.Error("Failed to query metrics", "error", err)
 						} else {
-							canarySpan.AddEvent("Metrics queried successfully")
+							runSpan.AddEvent("Metrics queried successfully")
 						}
 
 						// publish results of expected diff (comparator)
 						err = c.Publish()
 						if err != nil {
-							errMsg := "Failed to publish metric query results"
-							canarySpan.RecordError(err)
-							canarySpan.SetStatus(codes.Error, errMsg)
-							canarySpan.AddEvent(errMsg)
-							slog.Error(errMsg, "error", err)
+							runSpan.RecordError(err)
+							runSpan.SetStatus(codes.Error, "Failed to publish metric query results")
+							slog.Error("Failed to publish metric query results", "error", err)
 						} else {
-							canarySpan.AddEvent("Metric query results published successfully")
+							runSpan.AddEvent("Metric query results published successfully")
 						}
+						runSpan.End()
 
-						canarySpan.End()
 					}
+					canarySpan.End()
 				}
+
 			}
 		}(canaryName, canaryConfig)
 	}
 	wg.Wait()
-
 }
