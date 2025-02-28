@@ -10,6 +10,7 @@ services:
     command:
       - -log.level=debug
       - -config=/config.yaml
+      - -tracing.endpoint=otel-collector:4317
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.110.0
     ports:
@@ -29,3 +30,10 @@ services:
       - '-loggerLevel=INFO'
       - '-promscrape.config=scrape.yaml'
       - '-selfScrapeInterval=10s'
+  oteltui:
+    image: ymtdzzz/otel-tui:latest
+    container_name: otel-tui
+    stdin_open: true
+    tty: true
+    # Override entrypoint if you want use options
+    entrypoint: ["/otel-tui", "--grpc", "4320", "--enable-prom", "--prom-target", "o11y-canary:8080"]

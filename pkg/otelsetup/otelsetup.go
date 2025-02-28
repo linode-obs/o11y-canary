@@ -4,13 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
+	"go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.20.0"
 	"google.golang.org/grpc"
 )
@@ -24,13 +27,11 @@ var Meter = otel.Meter(ServiceString)
 // Tracer is a package wide service description variable for traces
 var Tracer = otel.Tracer(ServiceString)
 
-// SetupOTelSDK implements various telemetry providers for the o11y-canary itself, not any subsequent canary instructions
-func SetupOTelSDK(ctx context.Context, version string) (shutdown func(context.Context) error, err error) {
+// SetupOTelSDK implements various telemetry providers for the o11y-canary itself
+func SetupOTelSDK(ctx context.Context, version string, tracingEndpoint string) (shutdown func(context.Context) error, err error) {
 	var shutdownFuncs []func(context.Context) error
 
-	// shutdown calls cleanup functions registered via shutdownFuncs.
-	// The errors from the calls are joined.
-	// Each registered cleanup will be invoked once.
+	// Shutdown function for cleanup
 	shutdown = func(ctx context.Context) error {
 		var err error
 		for _, fn := range shutdownFuncs {
@@ -40,15 +41,15 @@ func SetupOTelSDK(ctx context.Context, version string) (shutdown func(context.Co
 		return err
 	}
 
-	// handleErr calls shutdown for cleanup and makes sure that all errors are returned.
+	// Handle errors and call shutdown
 	handleErr := func(inErr error) {
 		err = errors.Join(inErr, shutdown(ctx))
 	}
 
-	// dynamic version from linker
+	// Initialize Resource
 	res := InitializeResource(version)
 
-	// Set up meter provider.
+	// Set up meter provider
 	meterProvider, err := newMeterProvider(res)
 	if err != nil {
 		handleErr(err)
@@ -56,6 +57,22 @@ func SetupOTelSDK(ctx context.Context, version string) (shutdown func(context.Co
 	}
 	shutdownFuncs = append(shutdownFuncs, meterProvider.Shutdown)
 	otel.SetMeterProvider(meterProvider)
+
+	// Setup tracing only if tracingEndpoint is provided
+	if tracingEndpoint != "" {
+		slog.Info("Enabling tracing", "tracingEndpoint", tracingEndpoint)
+
+		var tp *trace.TracerProvider
+		var shutdownTracing func(context.Context) error
+		tp, shutdownTracing, err = setupTracing(ctx, res, tracingEndpoint)
+		// TODO look at shutdownfuncs
+		if err != nil {
+			handleErr(err)
+			return
+		}
+		shutdownFuncs = append(shutdownFuncs, shutdownTracing)
+		otel.SetTracerProvider(tp)
+	}
 
 	return
 }
@@ -85,6 +102,23 @@ func InitOTLPMeterProvider(ctx context.Context, res *resource.Resource, conn *gr
 	)
 
 	return meterProvider, nil
+}
+
+func setupTracing(ctx context.Context, res *resource.Resource, endpoint string) (*trace.TracerProvider, func(context.Context) error, error) {
+	exporter, err := otlptracegrpc.New(ctx,
+		otlptracegrpc.WithEndpoint(endpoint),
+		otlptracegrpc.WithInsecure(),
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create OTLP gRPC exporter: %w", err)
+	}
+
+	tracerProvider := trace.NewTracerProvider(
+		trace.WithBatcher(exporter),
+		trace.WithResource(res),
+	)
+
+	return tracerProvider, tracerProvider.Shutdown, nil
 }
 
 // InitializeResource initializes the resource with the given version as we have to link that from main

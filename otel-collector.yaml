@@ -5,9 +5,12 @@ receivers:
         endpoint: 0.0.0.0:4317
       http:
         endpoint: 0.0.0.0:4318
+
 processors:
+
 extensions:
   health_check: {}
+
 exporters:
   otlphttp/victoriametrics:
     endpoint: http://vm-singleton:8428/opentelemetry
@@ -15,14 +18,26 @@ exporters:
     encoding: proto
     tls:
       insecure: true
+
+  otlp/oteltui:
+    endpoint: http://oteltui:4320
+    tls:
+      insecure: true
+
   debug:
+
 service:
   extensions: [health_check]
   telemetry:
     metrics:
       address: "0.0.0.0:8888"
   pipelines:
+    traces:
+      receivers: [otlp]
+      processors: []
+      exporters: [otlp/oteltui]  # Send traces to otel-tui
+
     metrics:
       receivers: [otlp]
       processors: []
-      exporters: [otlphttp/victoriametrics]
+      exporters: [otlphttp/victoriametrics]  # Send metrics to VictoriaMetrics

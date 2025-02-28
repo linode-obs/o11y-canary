@@ -87,7 +87,7 @@ func (c *Canary) Write(ctx context.Context, meterProvider metric.MeterProvider, 
 		randomValue := float64(rand.Intn(100)) // does this need to be random values? i guess why not for later fetching
 		// TODO look at loki canary logic again for their values
 
-		// TOO use something like loki canary streams to help identify the time series by labels?
+		// TODO use something like loki canary streams to help identify the time series by labels?
 		labels := []attribute.KeyValue{
 			attribute.String("target", target),
 			attribute.String("canary", "true"),

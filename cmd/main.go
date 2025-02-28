@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/pprof"
@@ -15,8 +16,12 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
+	"go.opentelemetry.io/otel/trace"
 	yaml "gopkg.in/yaml.v2"
 )
 
@@ -32,6 +37,7 @@ func main() {
 
 	logLevel := flag.String("log.level", defaultLogLevel, "Set log level (options: info, warn, error, debug)")
 	configFileFlag := flag.String("config", "config.yaml", "Path to the configuration file")
+	tracingEndpoint := flag.String("tracing.endpoint", "localhost:4317", "Tracing endpoint")
 	flag.Parse()
 
 	var slogLevel slog.Level
@@ -69,7 +75,7 @@ func main() {
 	}
 
 	// Set up OpenTelemetry.
-	otelShutdown, err := otelsetup.SetupOTelSDK(ctx, Version)
+	otelShutdown, err := otelsetup.SetupOTelSDK(ctx, Version, *tracingEndpoint)
 	if err != nil {
 		slog.Error("Failed to initialize OpenTelemetry", "error", err)
 		os.Exit(1)
@@ -105,6 +111,22 @@ func main() {
 		}
 	}()
 
+	// canonical trace
+	tracer := otel.Tracer("o11y-canary")
+	ctx, span := tracer.Start(ctx, "main",
+		trace.WithAttributes(
+			attribute.String("tracing_endpoint", *tracingEndpoint),
+			attribute.String("service.name", "o11y-canary"),
+			attribute.String("service.version", Version),
+		),
+	)
+	span.AddEvent("Service started")
+	span.SetAttributes(
+		attribute.String("config_file", *configFileFlag),
+		attribute.String("log_level", *logLevel),
+	)
+	defer span.End()
+
 	var wg sync.WaitGroup
 
 	for canaryName, canaryConfig := range canaryConfig.Canaries {
@@ -112,6 +134,17 @@ func main() {
 		// Start a goroutine for each canary *run* and handle cancellation
 		go func(name string, canaryConfig config.CanaryConfig) {
 			defer wg.Done()
+
+			canaryCtx, canarySpan := tracer.Start(ctx, fmt.Sprintf("canary-%s", name),
+				trace.WithAttributes(
+					attribute.String("canary.name", name),
+					attribute.String("canary.type", canaryConfig.Type),
+					attribute.String("ingest.endpoint", canaryConfig.Ingest[0]),
+					attribute.Int64("interval_ms", canaryConfig.Interval.Milliseconds()),
+					attribute.Int64("timeout_ms", canaryConfig.Timeout.Milliseconds()),
+				),
+			)
+			canarySpan.AddEvent("Canary initialized")
 
 			res := resource.NewWithAttributes(
 				semconv.SchemaURL,
@@ -124,9 +157,15 @@ func main() {
 
 			// Initialize client setup outside the ticker loop
 			// Each canary gets its own meterProvider (+ grpc client), cleanup func, and single gauge metric
-			meterProvider, cleanup, gauge, err := c.InitWriteClient(ctx, res, canaryConfig.Ingest[0], canaryConfig.Interval, canaryConfig.Timeout)
+			// TODO handle multiples ingests
+			meterProvider, cleanup, gauge, err := c.InitWriteClient(canaryCtx, res, canaryConfig.Ingest[0], canaryConfig.Interval, canaryConfig.Timeout)
 			if err != nil {
-				slog.Error("Failed to initialize metric client", "error", err)
+				errMsg := "Failed to initialize metric client"
+				canarySpan.RecordError(err)
+				canarySpan.SetStatus(codes.Error, errMsg)
+				canarySpan.AddEvent(errMsg)
+				slog.Error(errMsg, "error", err)
+				canarySpan.End()
 				return
 			}
 			defer cleanup()
@@ -138,35 +177,58 @@ func main() {
 			for {
 				select {
 				case <-ctx.Done():
-					slog.Info("Shutting down canary", "name", name)
+					infoMsg := "Canary shutdown after context cancellation"
+					canarySpan.SetStatus(codes.Ok, infoMsg)
+					canarySpan.AddEvent(infoMsg)
+					slog.Info(infoMsg, "name", name)
+					canarySpan.End()
 					return
 				case <-ticker.C:
-					slog.Debug("Running canary", "name", name)
+					canarySpan.AddEvent("Running canary check")
 
 					if canaryConfig.Type == "metrics" {
 						// write to ingest
-						err := c.Write(ctx, meterProvider, canaryConfig.Ingest, gauge)
+						err := c.Write(canaryCtx, meterProvider, canaryConfig.Ingest, gauge)
 						if err != nil {
-							slog.Error("Failed to write metrics", "error", err)
+							errMsg := "Failed to write metrics"
+							canarySpan.RecordError(err)
+							canarySpan.SetStatus(codes.Error, errMsg)
+							canarySpan.AddEvent(errMsg)
+							slog.Error(errMsg, "error", err)
+						} else {
+							canarySpan.AddEvent("Metrics written successfully")
 						}
 
 						// query from query URL
 						err = c.Query()
 						if err != nil {
-							slog.Error("Failed to query metrics", "error", err)
+							errMsg := "Failed to query metrics"
+							canarySpan.RecordError(err)
+							canarySpan.SetStatus(codes.Error, errMsg)
+							canarySpan.AddEvent(errMsg)
+							slog.Error(errMsg, "error", err)
+						} else {
+							canarySpan.AddEvent("Metrics queried successfully")
 						}
 
 						// publish results of expected diff (comparator)
-						// make channel for publish results?
 						err = c.Publish()
 						if err != nil {
-							slog.Error("Failed to publish metric query results", "error", err)
+							errMsg := "Failed to publish metric query results"
+							canarySpan.RecordError(err)
+							canarySpan.SetStatus(codes.Error, errMsg)
+							canarySpan.AddEvent(errMsg)
+							slog.Error(errMsg, "error", err)
+						} else {
+							canarySpan.AddEvent("Metric query results published successfully")
 						}
 
+						canarySpan.End()
 					}
 				}
 			}
 		}(canaryName, canaryConfig)
 	}
 	wg.Wait()
+
 }
