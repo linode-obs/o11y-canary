@@ -3,7 +3,10 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
+	"net/http"
+	"net/http/pprof"
 	"o11y-canary/internal/canary"
 	"o11y-canary/internal/config"
 	"o11y-canary/pkg/otelsetup"
@@ -11,8 +14,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
+	"go.opentelemetry.io/otel/trace"
 	yaml "gopkg.in/yaml.v2"
 )
 
@@ -28,6 +37,7 @@ func main() {
 
 	logLevel := flag.String("log.level", defaultLogLevel, "Set log level (options: info, warn, error, debug)")
 	configFileFlag := flag.String("config", "config.yaml", "Path to the configuration file")
+	tracingEndpoint := flag.String("tracing.endpoint", "localhost:4317", "Tracing endpoint")
 	flag.Parse()
 
 	var slogLevel slog.Level
@@ -65,7 +75,7 @@ func main() {
 	}
 
 	// Set up OpenTelemetry.
-	otelShutdown, err := otelsetup.SetupOTelSDK(ctx, Version)
+	otelShutdown, err := otelsetup.SetupOTelSDK(ctx, Version, *tracingEndpoint)
 	if err != nil {
 		slog.Error("Failed to initialize OpenTelemetry", "error", err)
 		os.Exit(1)
@@ -80,6 +90,43 @@ func main() {
 	slog.Info("Version", "version", Version)
 	otelsetup.InitializeResource(Version)
 
+	r := mux.NewRouter()
+
+	// pprof boilerplate
+	r.HandleFunc("/debug/pprof/", pprof.Index)
+	r.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	r.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	r.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	r.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	r.HandleFunc("/debug/pprof/allocs", pprof.Handler("allocs").ServeHTTP)
+	r.HandleFunc("/debug/pprof/goroutine", pprof.Handler("goroutine").ServeHTTP)
+
+	r.Handle("/metrics", promhttp.Handler()).Methods("GET")
+
+	go func() {
+		slog.Info("Starting metrics & profiling http server", "port", 8080)
+		if err := http.ListenAndServe(":8080", r); err != nil {
+			slog.Error("Failed to start server", "error", err)
+			os.Exit(1)
+		}
+	}()
+
+	// canonical trace
+	tracer := otel.Tracer("o11y-canary")
+	ctx, span := tracer.Start(ctx, "main",
+		trace.WithAttributes(
+			attribute.String("tracing_endpoint", *tracingEndpoint),
+			attribute.String("service.name", "o11y-canary"),
+			attribute.String("service.version", Version),
+		),
+	)
+	span.AddEvent("Service started")
+	span.SetAttributes(
+		attribute.String("config_file", *configFileFlag),
+		attribute.String("log_level", *logLevel),
+	)
+	defer span.End()
+
 	var wg sync.WaitGroup
 
 	for canaryName, canaryConfig := range canaryConfig.Canaries {
@@ -87,6 +134,19 @@ func main() {
 		// Start a goroutine for each canary *run* and handle cancellation
 		go func(name string, canaryConfig config.CanaryConfig) {
 			defer wg.Done()
+
+			tracer := otel.Tracer("o11y-canary")
+
+			canaryCtx, canarySpan := tracer.Start(ctx, fmt.Sprintf("canary-%s", name),
+				trace.WithAttributes(
+					attribute.String("canary.name", name),
+					attribute.String("canary.type", canaryConfig.Type),
+					attribute.String("ingest.endpoint", canaryConfig.Ingest[0]),
+					attribute.Int64("interval_ms", canaryConfig.Interval.Milliseconds()),
+					attribute.Int64("timeout_ms", canaryConfig.Timeout.Milliseconds()),
+				),
+			)
+			canarySpan.AddEvent("Canary initialized")
 
 			res := resource.NewWithAttributes(
 				semconv.SchemaURL,
@@ -99,9 +159,15 @@ func main() {
 
 			// Initialize client setup outside the ticker loop
 			// Each canary gets its own meterProvider (+ grpc client), cleanup func, and single gauge metric
-			meterProvider, cleanup, gauge, err := c.InitWriteClient(ctx, res, canaryConfig.Ingest[0], canaryConfig.Interval, canaryConfig.Timeout)
+			// TODO handle multiples ingests
+			meterProvider, cleanup, gauge, err := c.InitWriteClient(canaryCtx, res, canaryConfig.Ingest[0], canaryConfig.Interval, canaryConfig.Timeout)
 			if err != nil {
-				slog.Error("Failed to initialize metric client", "error", err)
+				errMsg := "Failed to initialize metric client"
+				canarySpan.RecordError(err)
+				canarySpan.SetStatus(codes.Error, errMsg)
+				canarySpan.AddEvent(errMsg)
+				slog.Error(errMsg, "error", err)
+				canarySpan.End()
 				return
 			}
 			defer cleanup()
@@ -113,33 +179,54 @@ func main() {
 			for {
 				select {
 				case <-ctx.Done():
-					slog.Info("Shutting down canary", "name", name)
+					infoMsg := "Canary shutdown after context cancellation"
+					canarySpan.SetStatus(codes.Ok, infoMsg)
+					canarySpan.AddEvent(infoMsg)
+					slog.Info(infoMsg, "name", name)
+					canarySpan.End()
 					return
+
 				case <-ticker.C:
-					slog.Debug("Running canary", "name", name)
+					// start a new trace for each canary op
+					runCtx, runSpan := tracer.Start(canaryCtx, fmt.Sprintf("canary-write-%s", name))
+					runSpan.AddEvent("Running canary check")
 
 					if canaryConfig.Type == "metrics" {
 						// write to ingest
-						err := c.Write(ctx, meterProvider, canaryConfig.Ingest, gauge)
+						err := c.Write(runCtx, meterProvider, canaryConfig.Ingest, gauge)
 						if err != nil {
+							runSpan.RecordError(err)
+							runSpan.SetStatus(codes.Error, "Failed to write metrics")
 							slog.Error("Failed to write metrics", "error", err)
+						} else {
+							runSpan.AddEvent("Metrics written successfully")
 						}
 
 						// query from query URL
 						err = c.Query()
 						if err != nil {
+							runSpan.RecordError(err)
+							runSpan.SetStatus(codes.Error, "Failed to query metrics")
 							slog.Error("Failed to query metrics", "error", err)
+						} else {
+							runSpan.AddEvent("Metrics queried successfully")
 						}
 
 						// publish results of expected diff (comparator)
-						// make channel for publish results?
 						err = c.Publish()
 						if err != nil {
+							runSpan.RecordError(err)
+							runSpan.SetStatus(codes.Error, "Failed to publish metric query results")
 							slog.Error("Failed to publish metric query results", "error", err)
+						} else {
+							runSpan.AddEvent("Metric query results published successfully")
 						}
+						runSpan.End()
 
 					}
+					canarySpan.End()
 				}
+
 			}
 		}(canaryName, canaryConfig)
 	}

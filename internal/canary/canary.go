@@ -8,6 +8,7 @@ import (
 	"o11y-canary/pkg/otelsetup"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -40,7 +41,11 @@ type Targets struct {
 func (c *Canary) InitWriteClient(ctx context.Context, res *resource.Resource, target string, interval time.Duration, timeout time.Duration) (metric.MeterProvider, func(), metric.Float64Gauge, error) {
 
 	// TODO - TLS support
-	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// stats handler provides automatig grpc (rpc_) metrics
+	conn, err := grpc.NewClient(target,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+	)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to create gRPC connection: %v", err)
 	}
@@ -82,7 +87,7 @@ func (c *Canary) Write(ctx context.Context, meterProvider metric.MeterProvider, 
 		randomValue := float64(rand.Intn(100)) // does this need to be random values? i guess why not for later fetching
 		// TODO look at loki canary logic again for their values
 
-		// TOO use something like loki canary streams to help identify the time series by labels?
+		// TODO use something like loki canary streams to help identify the time series by labels?
 		labels := []attribute.KeyValue{
 			attribute.String("target", target),
 			attribute.String("canary", "true"),

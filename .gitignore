@@ -28,6 +28,7 @@ dist/
 
 .vscode
 o11y-canary
+o11y_canary
 
 # venom logs
 venom*log
