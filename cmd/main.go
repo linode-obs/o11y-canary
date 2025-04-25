@@ -14,11 +14,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
 	"go.opentelemetry.io/otel/trace"
@@ -192,8 +194,12 @@ func main() {
 					runSpan.AddEvent("Running canary check")
 
 					if canaryConfig.Type == "metrics" {
+						// random UID to put on label to make sure we retrieve that exact time series again
+						requestID := uuid.New().String()
+
 						// write to ingest
-						err := c.Write(runCtx, meterProvider, canaryConfig.Ingest, gauge)
+						// TODO - add target label to gauge
+						err := c.Write(runCtx, meterProvider, canaryConfig.Ingest, gauge, requestID)
 						if err != nil {
 							runSpan.RecordError(err)
 							runSpan.SetStatus(codes.Error, "Failed to write metrics")
@@ -203,12 +209,35 @@ func main() {
 						}
 
 						// query from query URL
-						err = c.Query()
+						meter := meterProvider.Meter("todo_change_this_to_canary_name")
+
+						attempts, _ := meter.Int64Counter(
+							"o11y_canary_query_attempts_total",
+							metric.WithDescription("Total number of query attempts"),
+						)
+
+						successes, _ := meter.Int64Counter(
+							"o11y_canary_query_successes_total",
+							metric.WithDescription("Total number of successful queries"),
+						)
+
+						durHist, _ := meter.Float64Histogram(
+							"o11y_canary_query_duration_seconds",
+							metric.WithDescription("Duration of successful queries"),
+						)
+
+						start := time.Now()
+						attempts.Add(ctx, 1)
+
+						err = c.Query(runCtx, canaryConfig.Query, requestID)
 						if err != nil {
 							runSpan.RecordError(err)
 							runSpan.SetStatus(codes.Error, "Failed to query metrics")
 							slog.Error("Failed to query metrics", "error", err)
 						} else {
+							duration := time.Since(start).Seconds()
+							successes.Add(ctx, 1)
+							durHist.Record(ctx, duration)
 							runSpan.AddEvent("Metrics queried successfully")
 						}
 

@@ -29,8 +29,9 @@ testcases:
     steps:
       - type: exec
       # don't think retries/delay are supported in exec steps
+      # big sleep to get some data going
         script: |
-          sleep 120; curl -G http://localhost:8428/api/v1/query \
+          sleep 60; curl -G http://localhost:8428/api/v1/query \
           -H "Content-Type: application/json" \
           --data-urlencode 'query=o11y_canary_canaried_metric_total{canary="true"}'
         assertions:
@@ -39,6 +40,16 @@ testcases:
         - result.systemout ShouldContainSubstring '"status":"success"'
         - result.systemout ShouldContainSubstring "__name__":"o11y_canary_canaried_metric_total"
         - result.systemout ShouldContainSubstring "service.name":"my_canary_1"
+
+  - name: Check for metric query() existence and that queries were successful
+    script: |
+      curl -G http://localhost:8428/api/v1/query \
+        -H "Content-Type: application/json" \
+        --data-urlencode 'query=o11y_canary_query_successes_total > 0'
+    assertions:
+      - result.code ShouldEqual 0
+      - result.systemout ShouldContainSubstring '"status":"success"'
+      - result.systemout ShouldContainSubstring '__name__":"o11y_canary_query_successes_total"'
 
   - name: clean up docker resources
     steps:
