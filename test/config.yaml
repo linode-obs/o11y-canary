@@ -7,8 +7,8 @@ canary:
       - otel-collector:4317
       # TODO - TLS settings
     query:
-      - select-endpoint.my-cluster.com
-      # TODO - TLS settings
+      - http://vm-singleton:8428
+      # TODO - TLS settings?
     additional_labels:
       environment: staging
     # TODO - break up interval into ingest and query?

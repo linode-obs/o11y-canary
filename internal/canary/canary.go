@@ -8,6 +8,8 @@ import (
 	"o11y-canary/pkg/otelsetup"
 	"time"
 
+	"github.com/prometheus/client_golang/api"
+	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -80,7 +82,7 @@ func (c *Canary) InitWriteClient(ctx context.Context, res *resource.Resource, ta
 }
 
 // Write performs a write operation for a counter
-func (c *Canary) Write(ctx context.Context, meterProvider metric.MeterProvider, targets []string, gauge metric.Float64Gauge) (err error) {
+func (c *Canary) Write(ctx context.Context, meterProvider metric.MeterProvider, targets []string, gauge metric.Float64Gauge, requestID string) (err error) {
 	for _, target := range targets {
 
 		// generate metrics
@@ -91,20 +93,45 @@ func (c *Canary) Write(ctx context.Context, meterProvider metric.MeterProvider, 
 		labels := []attribute.KeyValue{
 			attribute.String("target", target),
 			attribute.String("canary", "true"),
+			// TODO - request_id will be unbounded cardinality
+			// need to limit to like 5 active time series or something
+			attribute.String("canary_request_id", requestID),
 		}
 
 		gauge.Record(ctx, randomValue, metric.WithAttributes(labels...))
 
 		// TODO canonical log here?
-		slog.Debug("Writing metric", "ingest", target)
+		slog.Debug("Writing metric", "ingest", target, "canary_request_id", requestID)
 
 	}
 	return nil
 }
 
 // Query performs a query operation
-func (c *Canary) Query() (err error) {
+func (c *Canary) Query(ctx context.Context, queryTargets []string, requestID string) (err error) {
 
+	for _, target := range queryTargets {
+		// https://pkg.go.dev/github.com/prometheus/client_golang@v1.22.0/api/prometheus/v1#example-API-Query
+		slog.Debug("Querying metric", "target", target, "canary_request_id", requestID)
+		client, err := api.NewClient(api.Config{Address: target})
+		if err != nil {
+			return err
+		}
+
+		api := v1.NewAPI(client)
+
+		query := fmt.Sprintf(`o11y_canary_canaried_metric_total{canary="true", canary_request_id="%s"}`, requestID)
+
+		// discard result, just want to make sure we can query
+		_, warnings, err := api.Query(ctx, query, time.Now())
+		if err != nil {
+			return err
+		}
+		if len(warnings) > 0 {
+			slog.Info("Warning when querying target", "target", target, "canary_request_id", requestID, "warnings", warnings)
+		}
+		slog.Debug("Query successful", "target", target, "canary_request_id", requestID)
+	}
 	return nil
 }
 
