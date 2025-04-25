@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
@@ -194,8 +193,9 @@ func main() {
 					runSpan.AddEvent("Running canary check")
 
 					if canaryConfig.Type == "metrics" {
-						// random UID to put on label to make sure we retrieve that exact time series again
-						requestID := uuid.New().String()
+						// TODO - make this into a random int from configurable amount of time series to generate at once
+						// for now re-use spanID to keep track of metric
+						requestID := runSpan.SpanContext().SpanID().String()
 
 						// write to ingest
 						// TODO - add target label to gauge
@@ -211,33 +211,45 @@ func main() {
 						// query from query URL
 						meter := meterProvider.Meter("todo_change_this_to_canary_name")
 
-						attempts, _ := meter.Int64Counter(
-							"o11y_canary_query_attempts_total",
-							metric.WithDescription("Total number of query attempts"),
+						// total + success + error is a bit verbose but comfortable
+						queriesTotal, _ := meter.Int64Counter(
+							"o11y_canary_queries_total",
+							metric.WithDescription("Total number of query attempts, including success and failures"),
 						)
 
-						successes, _ := meter.Int64Counter(
+						querySuccesses, _ := meter.Int64Counter(
 							"o11y_canary_query_successes_total",
 							metric.WithDescription("Total number of successful queries"),
 						)
 
-						durHist, _ := meter.Float64Histogram(
+						queryErrors, _ := meter.Int64Counter(
+							"o11y_canary_query_errors_total",
+							metric.WithDescription("Total number of failed queries"),
+						)
+
+						// initiate error metric in case errors are rare
+						queryErrors.Add(ctx, 0)
+
+						durationHistogram, _ := meter.Float64Histogram(
 							"o11y_canary_query_duration_seconds",
 							metric.WithDescription("Duration of successful queries"),
+							metric.WithUnit("s"),
+							metric.WithExplicitBucketBoundaries(0.01, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30),
 						)
 
 						start := time.Now()
-						attempts.Add(ctx, 1)
+						queriesTotal.Add(ctx, 1)
 
 						err = c.Query(runCtx, canaryConfig.Query, requestID)
 						if err != nil {
 							runSpan.RecordError(err)
 							runSpan.SetStatus(codes.Error, "Failed to query metrics")
 							slog.Error("Failed to query metrics", "error", err)
+							queryErrors.Add(ctx, 1)
 						} else {
 							duration := time.Since(start).Seconds()
-							successes.Add(ctx, 1)
-							durHist.Record(ctx, duration)
+							querySuccesses.Add(ctx, 1)
+							durationHistogram.Record(ctx, duration)
 							runSpan.AddEvent("Metrics queried successfully")
 						}
 

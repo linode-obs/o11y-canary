@@ -119,8 +119,9 @@ func (c *Canary) Query(ctx context.Context, queryTargets []string, requestID str
 		}
 
 		api := v1.NewAPI(client)
-		// instant query, not range query?
+
 		query := fmt.Sprintf(`o11y_canary_canaried_metric_total{canary="true", canary_request_id="%s"}`, requestID)
+
 		// discard result, just want to make sure we can query
 		_, warnings, err := api.Query(ctx, query, time.Now())
 		if err != nil {
