@@ -107,12 +107,10 @@ func main() {
 	r := mux.NewRouter()
 
 	// internal metric setup
-	// promExporter, err := otelprom.New()
+	promExporter, err := otelprom.New(otelprom.WithRegisterer(prometheus.DefaultRegisterer))
 	if err != nil {
 		log.Fatalf("failed to create Prometheus exporter: %v", err)
 	}
-
-	promExporter, _ := otelprom.New(otelprom.WithRegisterer(prometheus.DefaultRegisterer))
 
 	promMeterProvider := otelmetric.NewMeterProvider(
 		otelmetric.WithReader(promExporter),
