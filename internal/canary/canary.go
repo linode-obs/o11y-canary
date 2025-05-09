@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"o11y-canary/internal/config"
 	"o11y-canary/pkg/otelsetup"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/api"
@@ -31,6 +32,8 @@ type Canary struct {
 	// should we add more values here? ie. targets
 	//	m Monitor
 	//	t Targets
+	// InsertionTimestamps helps keep requestIDs and when they were inserted in order
+	InsertionTimestamps sync.Map
 }
 
 // Targets holds the canary configurations
@@ -39,11 +42,11 @@ type Targets struct {
 	Config config.CanariesConfig
 }
 
-// InitWriteClient method for Canary to provide grpc client, meterprovider (with shutdown func), and metrics for later writing
-func (c *Canary) InitWriteClient(ctx context.Context, res *resource.Resource, target string, interval time.Duration, timeout time.Duration) (metric.MeterProvider, func(), metric.Float64Gauge, error) {
+// InitClient method for Canary to provide grpc client, meterprovider (with shutdown func), and metrics for later writing
+func (c *Canary) InitClient(ctx context.Context, res *resource.Resource, target string, interval time.Duration, timeout time.Duration) (metric.MeterProvider, func(), metric.Float64Gauge, error) {
 
 	// TODO - TLS support
-	// stats handler provides automatig grpc (rpc_) metrics
+	// stats handler provides automatic grpc (rpc_) metrics
 	conn, err := grpc.NewClient(target,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
@@ -68,8 +71,9 @@ func (c *Canary) InitWriteClient(ctx context.Context, res *resource.Resource, ta
 		conn.Close()
 	}
 
-	meter := meterProvider.Meter("todo_change_this_to_canary_name")
-	gauge, err := meter.Float64Gauge(
+	canaryMeter := meterProvider.Meter("o11y-canary-exported-data")
+
+	canaryGauge, err := canaryMeter.Float64Gauge(
 		"o11y_canary_canaried_metric_total",
 		metric.WithDescription("o11y canary test metric for canarying"),
 	)
@@ -78,7 +82,7 @@ func (c *Canary) InitWriteClient(ctx context.Context, res *resource.Resource, ta
 		return nil, nil, nil, fmt.Errorf("failed to create metric for write: %v", err)
 	}
 
-	return meterProvider, cleanup, gauge, nil
+	return meterProvider, cleanup, canaryGauge, nil
 }
 
 // Write performs a write operation for a counter
@@ -132,14 +136,5 @@ func (c *Canary) Query(ctx context.Context, queryTargets []string, requestID str
 		}
 		slog.Debug("Query successful", "target", target, "canary_request_id", requestID)
 	}
-	return nil
-}
-
-// Publish writes out new values to the /metrics interface.
-func (c *Canary) Publish() (err error) {
-	// method to write out new values to the /metrics interface
-	// perhaps return meter type?
-	// https://pkg.go.dev/go.opentelemetry.io/otel/metric#MeterProvider
-
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log"
 	"log/slog"
 	"net/http"
 	"net/http/pprof"
@@ -15,11 +16,14 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	otelprom "go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/metric"
+	otelmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
 	"go.opentelemetry.io/otel/trace"
@@ -88,10 +92,49 @@ func main() {
 		}
 	}()
 
-	slog.Info("Version", "version", Version)
+	slog.Info("Service info",
+		"version", Version,
+		"log_level", *logLevel,
+		"config_file", *configFileFlag,
+		"tracing_endpoint", *tracingEndpoint,
+		"service.name", "o11y-canary",
+		"service.version", Version,
+		"service.namespace", otelsetup.ServiceString,
+	)
+
 	otelsetup.InitializeResource(Version)
 
 	r := mux.NewRouter()
+
+	// internal metric setup
+	// promExporter, err := otelprom.New()
+	if err != nil {
+		log.Fatalf("failed to create Prometheus exporter: %v", err)
+	}
+
+	promExporter, _ := otelprom.New(otelprom.WithRegisterer(prometheus.DefaultRegisterer))
+
+	promMeterProvider := otelmetric.NewMeterProvider(
+		otelmetric.WithReader(promExporter),
+	)
+
+	// this meter is for internal metrics
+	meter := promMeterProvider.Meter("o11y-canary")
+
+	infoGauge, _ := meter.Float64Gauge(
+		"o11y_canary_info",
+		metric.WithDescription("o11y canary information"),
+	)
+
+	infoGauge.Record(ctx, 1, metric.WithAttributes(
+		attribute.String("version", Version),
+		attribute.String("log_level", *logLevel),
+		attribute.String("config_file", *configFileFlag),
+		attribute.String("tracing_endpoint", *tracingEndpoint),
+		attribute.String("service.name", "o11y-canary"),
+		attribute.String("service.version", Version),
+		attribute.String("service.namespace", otelsetup.ServiceString),
+	))
 
 	// pprof boilerplate
 	r.HandleFunc("/debug/pprof/", pprof.Index)
@@ -161,7 +204,7 @@ func main() {
 			// Initialize client setup outside the ticker loop
 			// Each canary gets its own meterProvider (+ grpc client), cleanup func, and single gauge metric
 			// TODO handle multiples ingests
-			meterProvider, cleanup, gauge, err := c.InitWriteClient(canaryCtx, res, canaryConfig.Ingest[0], canaryConfig.Interval, canaryConfig.Timeout)
+			meterProvider, cleanup, gauge, err := c.InitClient(canaryCtx, res, canaryConfig.Ingest[0], canaryConfig.Interval, canaryConfig.Timeout)
 			if err != nil {
 				errMsg := "Failed to initialize metric client"
 				canarySpan.RecordError(err)
@@ -198,7 +241,9 @@ func main() {
 						requestID := runSpan.SpanContext().SpanID().String()
 
 						// write to ingest
-						// TODO - add target label to gauge
+						insertionTime := time.Now()
+						// align requestID with insertion time for later diffing
+						c.InsertionTimestamps.Store(requestID, insertionTime)
 						err := c.Write(runCtx, meterProvider, canaryConfig.Ingest, gauge, requestID)
 						if err != nil {
 							runSpan.RecordError(err)
@@ -207,9 +252,6 @@ func main() {
 						} else {
 							runSpan.AddEvent("Metrics written successfully")
 						}
-
-						// query from query URL
-						meter := meterProvider.Meter("todo_change_this_to_canary_name")
 
 						// total + success + error is a bit verbose but comfortable
 						queriesTotal, _ := meter.Int64Counter(
@@ -228,7 +270,10 @@ func main() {
 						)
 
 						// initiate error metric in case errors are rare
-						queryErrors.Add(ctx, 0)
+						// TODO - Prometheus created timestamp would be better
+						queryErrors.Add(ctx, 0, metric.WithAttributes(
+							attribute.String("canary_name", name),
+						))
 
 						durationHistogram, _ := meter.Float64Histogram(
 							"o11y_canary_query_duration_seconds",
@@ -237,31 +282,49 @@ func main() {
 							metric.WithExplicitBucketBoundaries(0.01, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30),
 						)
 
+						lagHistogram, _ := meter.Float64Histogram(
+							"o11y_canary_lag_duration_seconds",
+							metric.WithDescription("Duration of how long metric takes to populate from write to query"),
+							metric.WithUnit("s"),
+							metric.WithExplicitBucketBoundaries(0.01, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30),
+						)
+
 						start := time.Now()
-						queriesTotal.Add(ctx, 1)
+						queriesTotal.Add(ctx, 1, metric.WithAttributes(
+							attribute.String("canary_name", name),
+						))
 
 						err = c.Query(runCtx, canaryConfig.Query, requestID)
 						if err != nil {
 							runSpan.RecordError(err)
 							runSpan.SetStatus(codes.Error, "Failed to query metrics")
 							slog.Error("Failed to query metrics", "error", err)
-							queryErrors.Add(ctx, 1)
+							queryErrors.Add(ctx, 1, metric.WithAttributes(
+								attribute.String("canary_name", name),
+							))
 						} else {
 							duration := time.Since(start).Seconds()
-							querySuccesses.Add(ctx, 1)
-							durationHistogram.Record(ctx, duration)
+							querySuccesses.Add(ctx, 1, metric.WithAttributes(
+								attribute.String("canary_name", name),
+							))
+							durationHistogram.Record(ctx, duration, metric.WithAttributes(
+								attribute.String("canary_name", name),
+							))
+
+							if val, ok := c.InsertionTimestamps.Load(requestID); ok {
+								// must do type assertion of insertedTime
+								insertedAt := val.(time.Time)
+								lag := time.Since(insertedAt).Seconds()
+								lagHistogram.Record(runCtx, lag, metric.WithAttributes(
+									attribute.String("canary_name", name),
+								))
+								// clean up the map, can't hurt
+								c.InsertionTimestamps.Delete(requestID)
+							}
+
 							runSpan.AddEvent("Metrics queried successfully")
 						}
 
-						// publish results of expected diff (comparator)
-						err = c.Publish()
-						if err != nil {
-							runSpan.RecordError(err)
-							runSpan.SetStatus(codes.Error, "Failed to publish metric query results")
-							slog.Error("Failed to publish metric query results", "error", err)
-						} else {
-							runSpan.AddEvent("Metric query results published successfully")
-						}
 						runSpan.End()
 
 					}
