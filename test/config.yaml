@@ -15,4 +15,6 @@ canary:
     # TODO - break up interval into ingest and query?
     # s/ingest/write ? ingest hard to understand
     interval: 5s
-    timeout: 10s
+    write_timeout: 10s # time before giving up when writing the series to ingest endpoints. default 10s
+    query_timeout: 60s # time before giving up querying the series from query endpoints. default 60s
+    max_active_canaried_series: 5 # active time series sent out to ingest endpoint. default 50

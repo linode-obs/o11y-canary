@@ -34,6 +34,8 @@ type Canary struct {
 	//	t Targets
 	// InsertionTimestamps helps keep requestIDs and when they were inserted in order
 	InsertionTimestamps sync.Map
+	// ActiveRequestIDs is a list of request IDs that are currently active. Used to limit cardinality
+	ActiveRequestIDs []string
 }
 
 // Targets holds the canary configurations
@@ -97,22 +99,21 @@ func (c *Canary) Write(ctx context.Context, meterProvider metric.MeterProvider, 
 		labels := []attribute.KeyValue{
 			attribute.String("target", target),
 			attribute.String("canary", "true"),
-			// TODO - request_id will be unbounded cardinality
-			// need to limit to like 5 active time series or something
 			attribute.String("canary_request_id", requestID),
 		}
 
 		gauge.Record(ctx, randomValue, metric.WithAttributes(labels...))
 
-		// TODO canonical log here?
 		slog.Debug("Writing metric", "ingest", target, "canary_request_id", requestID)
+
+		// TODO - return error and metrics for failed writes better. also return error + metric for timeouts
 
 	}
 	return nil
 }
 
 // Query performs a query operation
-func (c *Canary) Query(ctx context.Context, queryTargets []string, requestID string) (err error) {
+func (c *Canary) Query(ctx context.Context, queryTargets []string, requestID string, queryTimeout time.Duration) (err error) {
 
 	for _, target := range queryTargets {
 		// https://pkg.go.dev/github.com/prometheus/client_golang@v1.22.0/api/prometheus/v1#example-API-Query
@@ -126,8 +127,12 @@ func (c *Canary) Query(ctx context.Context, queryTargets []string, requestID str
 
 		query := fmt.Sprintf(`o11y_canary_canaried_metric_total{canary="true", canary_request_id="%s"}`, requestID)
 
+		// Apply per-query timeout via context
+		queryCtx, cancel := context.WithTimeout(ctx, queryTimeout*time.Second)
+		defer cancel()
+
 		// discard result, just want to make sure we can query
-		_, warnings, err := api.Query(ctx, query, time.Now())
+		_, warnings, err := api.Query(queryCtx, query, time.Now())
 		if err != nil {
 			return err
 		}
@@ -135,6 +140,8 @@ func (c *Canary) Query(ctx context.Context, queryTargets []string, requestID str
 			slog.Info("Warning when querying target", "target", target, "canary_request_id", requestID, "warnings", warnings)
 		}
 		slog.Debug("Query successful", "target", target, "canary_request_id", requestID)
+
+		// TODO - return error and metrics for failed writes better. also return error + metric for timeouts
 	}
 	return nil
 }

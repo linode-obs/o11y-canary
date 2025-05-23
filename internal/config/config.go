@@ -9,7 +9,9 @@ type CanaryConfig struct {
 	Query            []string          `yaml:"query"`
 	AdditionalLabels map[string]string `yaml:"additional_labels"`
 	Interval         time.Duration     `yaml:"interval"`
-	Timeout          time.Duration     `yaml:"timeout"`
+	WriteTimeout     time.Duration     `yaml:"write_timeout"`
+	QueryTimeout     time.Duration     `yaml:"query_timeout"`
+	MaxActiveSeries  int               `yaml:"max_active_canaried_series"` // cardinality limit on maximum active series in rotation
 }
 
 // CanariesConfig holds multiple canary configurations

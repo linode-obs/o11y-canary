@@ -44,7 +44,6 @@ testcases:
           - result.systemout ShouldContainSubstring "__name__":"o11y_canary_canaried_metric_total"
           - result.systemout ShouldContainSubstring "service.name":"my_canary_1"
 
-
   - name: Check for metric query() existence and that queries were successful
     steps:
       - type: exec
@@ -69,7 +68,6 @@ testcases:
         assertions:
           - result.code ShouldEqual 0
 
-
   - name: Check for o11y_canary_info in internal metrics
     steps:
       - type: exec
@@ -77,8 +75,6 @@ testcases:
           curl -s http://localhost:8080/metrics | grep -q '^o11y_canary_info{'
         assertions:
           - result.code ShouldEqual 0
-
-
 
   - name: clean up docker resources
     steps:
