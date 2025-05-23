@@ -4,6 +4,7 @@ canary:
     # todo - need protocol field? could be otlp or remote write
     # also grpc vs http
     ingest:
+    # TODO - have option to write internal metrics about canary to same ingestion endpoint
       - otel-collector:4317
       # TODO - TLS settings
     query:

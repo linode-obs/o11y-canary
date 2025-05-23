@@ -24,52 +24,60 @@ testcases:
         assertions:
           - result.statuscode ShouldEqual 200
 
-# too much trouble with venom's http module, resorted to curl
+  # try a few times but fail after 60s total
   - name: Check for metric write() existence
     steps:
       - type: exec
-      # don't think retries/delay are supported in exec steps
-      # big sleep to get some data going
         script: |
-          sleep 60; curl -G http://localhost:8428/api/v1/query \
-          -H "Content-Type: application/json" \
-          --data-urlencode 'query=o11y_canary_canaried_metric_total{canary="true"}'
+          for i in $(seq 1 6); do
+            out=$(curl -s -G http://localhost:8428/api/v1/query \
+              -H "Content-Type: application/json" \
+              --data-urlencode 'query=o11y_canary_canaried_metric_total{canary="true"}')
+            echo "$out" | grep -q '"__name__":"o11y_canary_canaried_metric_total"' && echo "$out" && exit 0
+            sleep 10
+          done
+          echo "Metric not found after 60s" >&2
+          exit 1
         assertions:
-        # tried systemoutjson but had trouble parsing exact path
-        - result.code ShouldEqual 0
-        - result.systemout ShouldContainSubstring '"status":"success"'
-        - result.systemout ShouldContainSubstring "__name__":"o11y_canary_canaried_metric_total"
-        - result.systemout ShouldContainSubstring "service.name":"my_canary_1"
+          - result.code ShouldEqual 0
+          - result.systemout ShouldContainSubstring '"status":"success"'
+          - result.systemout ShouldContainSubstring "__name__":"o11y_canary_canaried_metric_total"
+          - result.systemout ShouldContainSubstring "service.name":"my_canary_1"
+
 
   - name: Check for metric query() existence and that queries were successful
-    script: |
-      curl -G http://localhost:8428/api/v1/query \
-        -H "Content-Type: application/json" \
-        --data-urlencode 'query=o11y_canary_query_successes_total > 0'
-    assertions:
-      - result.code ShouldEqual 0
-      - result.systemout ShouldContainSubstring '"status":"success"'
-      - result.systemout ShouldContainSubstring '__name__":"o11y_canary_query_successes_total"'
+    steps:
+      - type: exec
+        script: |
+          curl -s http://localhost:8080/metrics | grep -q '^o11y_canary_query_successes_total{.*} [1-9]'
+        assertions:
+          - result.code ShouldEqual 0
 
   - name: Check that total query count is incrementing
-    script: |
-      curl -G http://localhost:8428/api/v1/query \
-        -H "Content-Type: application/json" \
-        --data-urlencode 'query=o11y_canary_query_total > 0'
-    assertions:
-      - result.code ShouldEqual 0
-      - result.systemout ShouldContainSubstring '"status":"success"'
-      - result.systemout ShouldContainSubstring '__name__":"o11y_canary_query_total"'
+    steps:
+      - type: exec
+        script: |
+          curl -s http://localhost:8080/metrics | grep -q '^o11y_canary_queries_total{.*} [1-9]'
+        assertions:
+          - result.code ShouldEqual 0
 
   - name: Check that failed queries are zero
-    script: |
-      curl -G http://localhost:8428/api/v1/query \
-        -H "Content-Type: application/json" \
-        --data-urlencode 'query=o11y_canary_query_failures_total == 0'
-    assertions:
-      - result.code ShouldEqual 0
-      - result.systemout ShouldContainSubstring '"status":"success"'
-      - result.systemout ShouldContainSubstring '__name__":"o11y_canary_query_failures_total"'
+    steps:
+      - type: exec
+        script: |
+          curl -s http://localhost:8080/metrics | grep -q '^o11y_canary_query_errors_total{.*} 0'
+        assertions:
+          - result.code ShouldEqual 0
+
+
+  - name: Check for o11y_canary_info in internal metrics
+    steps:
+      - type: exec
+        script: |
+          curl -s http://localhost:8080/metrics | grep -q '^o11y_canary_info{'
+        assertions:
+          - result.code ShouldEqual 0
+
 
 
   - name: clean up docker resources
