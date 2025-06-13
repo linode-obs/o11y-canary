@@ -79,6 +79,29 @@ func main() {
 		slog.Debug("Configuration loaded successfully", "config", canaryConfig)
 	}
 
+	// apply defaults to config if they are not set
+	for name := range canaryConfig.Canaries {
+		config := canaryConfig.Canaries[name]
+
+		if config.MaxActiveSeries == 0 {
+			config.MaxActiveSeries = 50
+		}
+		if config.Interval == 0 {
+			config.Interval = 5 * time.Second
+		}
+		if config.WriteTimeout == 0 {
+			config.WriteTimeout = 10 * time.Second
+		}
+		if config.QueryTimeout == 0 {
+			config.QueryTimeout = 60 * time.Second
+		}
+		if config.Type == "" {
+			config.Type = "metrics"
+		}
+
+		canaryConfig.Canaries[name] = config
+	}
+
 	// Set up OpenTelemetry.
 	otelShutdown, err := otelsetup.SetupOTelSDK(ctx, Version, *tracingEndpoint)
 	if err != nil {
@@ -107,7 +130,7 @@ func main() {
 	r := mux.NewRouter()
 
 	// internal metric setup
-	promExporter, err := otelprom.New(otelprom.WithRegisterer(prometheus.DefaultRegisterer))
+	promExporter, err := otelprom.New(otelprom.WithRegisterer(prometheus.DefaultRegisterer), otelprom.WithoutScopeInfo())
 	if err != nil {
 		log.Fatalf("failed to create Prometheus exporter: %v", err)
 	}
@@ -185,7 +208,8 @@ func main() {
 					attribute.String("canary.type", canaryConfig.Type),
 					attribute.String("ingest.endpoint", canaryConfig.Ingest[0]),
 					attribute.Int64("interval_ms", canaryConfig.Interval.Milliseconds()),
-					attribute.Int64("timeout_ms", canaryConfig.Timeout.Milliseconds()),
+					attribute.Int64("write_timeout_ms", canaryConfig.WriteTimeout.Microseconds()),
+					attribute.Int64("query_timeout_ms", canaryConfig.QueryTimeout.Microseconds()),
 				),
 			)
 			canarySpan.AddEvent("Canary initialized")
@@ -202,7 +226,7 @@ func main() {
 			// Initialize client setup outside the ticker loop
 			// Each canary gets its own meterProvider (+ grpc client), cleanup func, and single gauge metric
 			// TODO handle multiples ingests
-			meterProvider, cleanup, gauge, err := c.InitClient(canaryCtx, res, canaryConfig.Ingest[0], canaryConfig.Interval, canaryConfig.Timeout)
+			meterProvider, cleanup, gauge, err := c.InitClient(canaryCtx, res, canaryConfig.Ingest[0], canaryConfig.Interval, canaryConfig.WriteTimeout)
 			if err != nil {
 				errMsg := "Failed to initialize metric client"
 				canarySpan.RecordError(err)
@@ -234,9 +258,16 @@ func main() {
 					runSpan.AddEvent("Running canary check")
 
 					if canaryConfig.Type == "metrics" {
-						// TODO - make this into a random int from configurable amount of time series to generate at once
-						// for now re-use spanID to keep track of metric
-						requestID := runSpan.SpanContext().SpanID().String()
+						var requestID string
+						if len(c.ActiveRequestIDs) < canaryConfig.MaxActiveSeries {
+							requestID = runSpan.SpanContext().SpanID().String()
+							c.ActiveRequestIDs = append(c.ActiveRequestIDs, requestID)
+						} else {
+							// re-use oldest requestID
+							requestID = c.ActiveRequestIDs[0]
+							// then rotate the requestID to the end of the list
+							c.ActiveRequestIDs = append(c.ActiveRequestIDs[1:], requestID)
+						}
 
 						// write to ingest
 						insertionTime := time.Now()
@@ -292,7 +323,7 @@ func main() {
 							attribute.String("canary_name", name),
 						))
 
-						err = c.Query(runCtx, canaryConfig.Query, requestID)
+						err = c.Query(runCtx, canaryConfig.Query, requestID, canaryConfig.QueryTimeout)
 						if err != nil {
 							runSpan.RecordError(err)
 							runSpan.SetStatus(codes.Error, "Failed to query metrics")
