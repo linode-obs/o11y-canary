@@ -202,11 +202,23 @@ func main() {
 
 			tracer := otel.Tracer("o11y-canary")
 
+			// combine these for the trace output
+			ingestURLs := []string{}
+			for _, ep := range canaryConfig.Ingest {
+				ingestURLs = append(ingestURLs, ep.URL)
+			}
+			queryURLs := []string{}
+			for _, ep := range canaryConfig.Query {
+				queryURLs = append(queryURLs, ep.URL)
+			}
+
 			canaryCtx, canarySpan := tracer.Start(ctx, fmt.Sprintf("canary-%s", name),
 				trace.WithAttributes(
 					attribute.String("canary.name", name),
 					attribute.String("canary.type", canaryConfig.Type),
-					attribute.String("ingest.endpoint", canaryConfig.Ingest[0]),
+					attribute.StringSlice("ingest.endpoints", ingestURLs),
+					attribute.StringSlice("query.endpoints", queryURLs),
+					attribute.Bool("tls.global_enabled", canaryConfig.TLS != nil && canaryConfig.TLS.Enabled),
 					attribute.Int64("interval_ms", canaryConfig.Interval.Milliseconds()),
 					attribute.Int64("write_timeout_ms", canaryConfig.WriteTimeout.Microseconds()),
 					attribute.Int64("query_timeout_ms", canaryConfig.QueryTimeout.Microseconds()),
@@ -225,141 +237,177 @@ func main() {
 
 			// Initialize client setup outside the ticker loop
 			// Each canary gets its own meterProvider (+ grpc client), cleanup func, and single gauge metric
-			// TODO handle multiples ingests
-			meterProvider, cleanup, gauge, err := c.InitClient(canaryCtx, res, canaryConfig.Ingest[0], canaryConfig.Interval, canaryConfig.WriteTimeout)
-			if err != nil {
-				errMsg := "Failed to initialize metric client"
-				canarySpan.RecordError(err)
-				canarySpan.SetStatus(codes.Error, errMsg)
-				canarySpan.AddEvent(errMsg)
-				slog.Error(errMsg, "error", err)
-				canarySpan.End()
-				return
+			ingestURLs = make([]string, len(canaryConfig.Ingest))
+			ingestTLSConfigs := make([]*config.TLSConfig, len(canaryConfig.Ingest))
+			for i, endpoint := range canaryConfig.Ingest {
+				ingestURLs[i] = endpoint.URL
+				if endpoint.TLS != nil {
+					ingestTLSConfigs[i] = endpoint.TLS
+				} else {
+					ingestTLSConfigs[i] = canaryConfig.TLS
+				}
 			}
-			defer cleanup()
 
-			// use ticker for goroutine compatibility
-			ticker := time.NewTicker(canaryConfig.Interval)
-			defer ticker.Stop()
-
-			for {
-				select {
-				case <-ctx.Done():
-					infoMsg := "Canary shutdown after context cancellation"
-					canarySpan.SetStatus(codes.Ok, infoMsg)
-					canarySpan.AddEvent(infoMsg)
-					slog.Info(infoMsg, "name", name)
+			//  make a new client for each ingestion URL
+			for i, url := range ingestURLs {
+				meterProvider, cleanup, gauge, err := c.InitClient(
+					canaryCtx, res, url, canaryConfig.Interval, canaryConfig.WriteTimeout, ingestTLSConfigs[i],
+				)
+				if err != nil {
+					errMsg := "Failed to initialize metric client"
+					canarySpan.RecordError(err)
+					canarySpan.SetStatus(codes.Error, errMsg)
+					canarySpan.AddEvent(errMsg)
+					slog.Error(errMsg, "error", err)
 					canarySpan.End()
 					return
+				}
+				defer cleanup()
 
-				case <-ticker.C:
-					// start a new trace for each canary op
-					runCtx, runSpan := tracer.Start(canaryCtx, fmt.Sprintf("canary-write-%s", name))
-					runSpan.AddEvent("Running canary check")
+				// use ticker for goroutine compatibility
+				ticker := time.NewTicker(canaryConfig.Interval)
+				defer ticker.Stop()
 
-					if canaryConfig.Type == "metrics" {
-						var requestID string
-						if len(c.ActiveRequestIDs) < canaryConfig.MaxActiveSeries {
-							requestID = runSpan.SpanContext().SpanID().String()
-							c.ActiveRequestIDs = append(c.ActiveRequestIDs, requestID)
-						} else {
-							// re-use oldest requestID
-							requestID = c.ActiveRequestIDs[0]
-							// then rotate the requestID to the end of the list
-							c.ActiveRequestIDs = append(c.ActiveRequestIDs[1:], requestID)
-						}
+				for {
+					select {
+					case <-ctx.Done():
+						infoMsg := "Canary shutdown after context cancellation"
+						canarySpan.SetStatus(codes.Ok, infoMsg)
+						canarySpan.AddEvent(infoMsg)
+						slog.Info(infoMsg, "name", name)
+						canarySpan.End()
+						return
 
-						// write to ingest
-						insertionTime := time.Now()
-						// align requestID with insertion time for later diffing
-						c.InsertionTimestamps.Store(requestID, insertionTime)
-						err := c.Write(runCtx, meterProvider, canaryConfig.Ingest, gauge, requestID)
-						if err != nil {
-							runSpan.RecordError(err)
-							runSpan.SetStatus(codes.Error, "Failed to write metrics")
-							slog.Error("Failed to write metrics", "error", err)
-						} else {
-							runSpan.AddEvent("Metrics written successfully")
-						}
+					case <-ticker.C:
+						// start a new trace for each canary op
+						runCtx, runSpan := tracer.Start(canaryCtx, fmt.Sprintf("canary-write-%s", name))
+						runSpan.AddEvent("Running canary check")
 
-						// total + success + error is a bit verbose but comfortable
-						queriesTotal, _ := meter.Int64Counter(
-							"o11y_canary_queries_total",
-							metric.WithDescription("Total number of query attempts, including success and failures"),
-						)
-
-						querySuccesses, _ := meter.Int64Counter(
-							"o11y_canary_query_successes_total",
-							metric.WithDescription("Total number of successful queries"),
-						)
-
-						queryErrors, _ := meter.Int64Counter(
-							"o11y_canary_query_errors_total",
-							metric.WithDescription("Total number of failed queries"),
-						)
-
-						// initiate error metric in case errors are rare
-						// TODO - Prometheus created timestamp would be better
-						queryErrors.Add(ctx, 0, metric.WithAttributes(
-							attribute.String("canary_name", name),
-						))
-
-						durationHistogram, _ := meter.Float64Histogram(
-							"o11y_canary_query_duration_seconds",
-							metric.WithDescription("Duration of successful queries"),
-							metric.WithUnit("s"),
-							metric.WithExplicitBucketBoundaries(0.01, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30),
-						)
-
-						lagHistogram, _ := meter.Float64Histogram(
-							"o11y_canary_lag_duration_seconds",
-							metric.WithDescription("Duration of how long metric takes to populate from write to query"),
-							metric.WithUnit("s"),
-							metric.WithExplicitBucketBoundaries(0.01, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30),
-						)
-
-						start := time.Now()
-						queriesTotal.Add(ctx, 1, metric.WithAttributes(
-							attribute.String("canary_name", name),
-						))
-
-						err = c.Query(runCtx, canaryConfig.Query, requestID, canaryConfig.QueryTimeout)
-						if err != nil {
-							runSpan.RecordError(err)
-							runSpan.SetStatus(codes.Error, "Failed to query metrics")
-							slog.Error("Failed to query metrics", "error", err)
-							queryErrors.Add(ctx, 1, metric.WithAttributes(
-								attribute.String("canary_name", name),
-							))
-						} else {
-							duration := time.Since(start).Seconds()
-							querySuccesses.Add(ctx, 1, metric.WithAttributes(
-								attribute.String("canary_name", name),
-							))
-							durationHistogram.Record(ctx, duration, metric.WithAttributes(
-								attribute.String("canary_name", name),
-							))
-
-							if val, ok := c.InsertionTimestamps.Load(requestID); ok {
-								// must do type assertion of insertedTime
-								insertedAt := val.(time.Time)
-								lag := time.Since(insertedAt).Seconds()
-								lagHistogram.Record(runCtx, lag, metric.WithAttributes(
-									attribute.String("canary_name", name),
-								))
-								// clean up the map, can't hurt
-								c.InsertionTimestamps.Delete(requestID)
+						if canaryConfig.Type == "metrics" {
+							var requestID string
+							if len(c.ActiveRequestIDs) < canaryConfig.MaxActiveSeries {
+								requestID = runSpan.SpanContext().SpanID().String()
+								c.ActiveRequestIDs = append(c.ActiveRequestIDs, requestID)
+							} else {
+								// re-use oldest requestID
+								requestID = c.ActiveRequestIDs[0]
+								// then rotate the requestID to the end of the list
+								c.ActiveRequestIDs = append(c.ActiveRequestIDs[1:], requestID)
 							}
 
-							runSpan.AddEvent("Metrics queried successfully")
+							// write to ingest
+							insertionTime := time.Now()
+							// align requestID with insertion time for later diffing
+							c.InsertionTimestamps.Store(requestID, insertionTime)
+
+							ingestURLs := make([]string, len(canaryConfig.Ingest))
+							for i, endpoint := range canaryConfig.Ingest {
+								ingestURLs[i] = endpoint.URL
+							}
+
+							err := c.Write(runCtx, meterProvider, ingestURLs, gauge, requestID)
+							if err != nil {
+								runSpan.RecordError(err)
+								runSpan.SetStatus(codes.Error, "Failed to write metrics")
+								slog.Error("Failed to write metrics", "error", err)
+							} else {
+								runSpan.AddEvent("Metrics written successfully")
+							}
+
+							// total + success + error is a bit verbose but comfortable
+							queriesTotal, _ := meter.Int64Counter(
+								"o11y_canary_queries_total",
+								metric.WithDescription("Total number of query attempts, including success and failures"),
+							)
+
+							querySuccesses, _ := meter.Int64Counter(
+								"o11y_canary_query_successes_total",
+								metric.WithDescription("Total number of successful queries"),
+							)
+
+							queryErrors, _ := meter.Int64Counter(
+								"o11y_canary_query_errors_total",
+								metric.WithDescription("Total number of failed queries"),
+							)
+
+							// initiate error metric in case errors are rare
+							// TODO - Prometheus created timestamp would be better
+							queryErrors.Add(ctx, 0, metric.WithAttributes(
+								attribute.String("canary_name", name),
+							))
+
+							durationHistogram, _ := meter.Float64Histogram(
+								"o11y_canary_query_duration_seconds",
+								metric.WithDescription("Duration of successful queries"),
+								metric.WithUnit("s"),
+								metric.WithExplicitBucketBoundaries(0.01, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30),
+							)
+
+							lagHistogram, _ := meter.Float64Histogram(
+								"o11y_canary_lag_duration_seconds",
+								metric.WithDescription("Duration of how long metric takes to populate from write to query"),
+								metric.WithUnit("s"),
+								metric.WithExplicitBucketBoundaries(0.01, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30),
+							)
+
+							start := time.Now()
+							queriesTotal.Add(ctx, 1, metric.WithAttributes(
+								attribute.String("canary_name", name),
+							))
+
+							// build query URLs and keep their TLS configs
+							// importantly if a query endpoint does not have a TLS config, use the canary's default TLS config
+							queryURLs := make([]string, len(canaryConfig.Query))
+							queryTLSConfigs := make([]*config.TLSConfig, len(canaryConfig.Query))
+							for i, endpoint := range canaryConfig.Query {
+								queryURLs[i] = endpoint.URL
+								if endpoint.TLS != nil {
+									queryTLSConfigs[i] = endpoint.TLS
+								} else {
+									queryTLSConfigs[i] = canaryConfig.TLS
+								}
+							}
+
+							for i, url := range queryURLs {
+								err := c.Query(runCtx, []string{url}, requestID, canaryConfig.QueryTimeout, queryTLSConfigs[i])
+								if err != nil {
+									runSpan.RecordError(err)
+									runSpan.SetStatus(codes.Error, "Failed to query metrics")
+									slog.Error("Failed to query metrics", "error", err)
+									queryErrors.Add(ctx, 1, metric.WithAttributes(
+										attribute.String("canary_name", name),
+									))
+								} else {
+									duration := time.Since(start).Seconds()
+									querySuccesses.Add(ctx, 1, metric.WithAttributes(
+										attribute.String("canary_name", name),
+									))
+									durationHistogram.Record(ctx, duration, metric.WithAttributes(
+										attribute.String("canary_name", name),
+									))
+
+									if val, ok := c.InsertionTimestamps.Load(requestID); ok {
+										// must do type assertion of insertedTime
+										insertedAt := val.(time.Time)
+										lag := time.Since(insertedAt).Seconds()
+										lagHistogram.Record(runCtx, lag, metric.WithAttributes(
+											attribute.String("canary_name", name),
+										))
+										// clean up the map, can't hurt
+										c.InsertionTimestamps.Delete(requestID)
+									}
+
+									runSpan.AddEvent("Metrics queried successfully")
+								}
+							}
+
+							runSpan.End()
+
 						}
-
-						runSpan.End()
-
+						canarySpan.End()
 					}
-					canarySpan.End()
-				}
 
+				}
 			}
 		}(canaryName, canaryConfig)
 	}

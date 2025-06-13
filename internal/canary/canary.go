@@ -2,10 +2,14 @@ package canary
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"o11y-canary/internal/config"
 	"o11y-canary/pkg/otelsetup"
+	"os"
 	"sync"
 	"time"
 
@@ -17,6 +21,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	"golang.org/x/exp/rand"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -45,19 +50,54 @@ type Targets struct {
 }
 
 // InitClient method for Canary to provide grpc client, meterprovider (with shutdown func), and metrics for later writing
-func (c *Canary) InitClient(ctx context.Context, res *resource.Resource, target string, interval time.Duration, timeout time.Duration) (metric.MeterProvider, func(), metric.Float64Gauge, error) {
+func (c *Canary) InitClient(ctx context.Context, res *resource.Resource, target string, interval time.Duration, timeout time.Duration, tlsConfig *config.TLSConfig) (metric.MeterProvider, func(), metric.Float64Gauge, error) {
 
-	// TODO - TLS support
+	// spent a while looking at TLS Implementations, easiest to just reload on each new connection
+	var creds credentials.TransportCredentials
+	if tlsConfig != nil && tlsConfig.Enabled {
+		tlsConf := &tls.Config{
+			ServerName:         tlsConfig.ServerName,
+			InsecureSkipVerify: tlsConfig.InsecureSkipVerify,
+			MinVersion:         tls.VersionTLS12,
+		}
+
+		if tlsConfig.CertFile != "" && tlsConfig.KeyFile != "" {
+			tlsConf.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+				cert, err := tls.LoadX509KeyPair(tlsConfig.CertFile, tlsConfig.KeyFile)
+				if err != nil {
+					return nil, fmt.Errorf("failed to load client certificates: %w", err)
+				}
+				return &cert, nil
+			}
+		}
+
+		if tlsConfig.CAFile != "" {
+			caCert, err := os.ReadFile(tlsConfig.CAFile)
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("failed to read CA file: %w", err)
+			}
+			caCertPool := x509.NewCertPool()
+			if !caCertPool.AppendCertsFromPEM(caCert) {
+				return nil, nil, nil, fmt.Errorf("failed to parse CA certificate")
+			}
+			tlsConf.RootCAs = caCertPool
+		}
+
+		creds = credentials.NewTLS(tlsConf)
+	} else {
+		creds = insecure.NewCredentials()
+	}
+
 	// stats handler provides automatic grpc (rpc_) metrics
 	conn, err := grpc.NewClient(target,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(creds),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 	)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to create gRPC connection: %v", err)
 	}
 
-	// TODO - dynamic CLI flags for connection, target, tls, etc
+	// TODO - dynamic CLI flags for connection, target, etc
 	meterProvider, err := otelsetup.InitOTLPMeterProvider(ctx, res, conn, timeout)
 	if err != nil {
 		slog.Error("Failed to create meter provider", "error", err)
@@ -113,12 +153,49 @@ func (c *Canary) Write(ctx context.Context, meterProvider metric.MeterProvider, 
 }
 
 // Query performs a query operation
-func (c *Canary) Query(ctx context.Context, queryTargets []string, requestID string, queryTimeout time.Duration) (err error) {
+func (c *Canary) Query(ctx context.Context, queryTargets []string, requestID string, queryTimeout time.Duration, tlsConfig *config.TLSConfig) (err error) {
 
 	for _, target := range queryTargets {
 		// https://pkg.go.dev/github.com/prometheus/client_golang@v1.22.0/api/prometheus/v1#example-API-Query
 		slog.Debug("Querying metric", "target", target, "canary_request_id", requestID)
-		client, err := api.NewClient(api.Config{Address: target})
+
+		clientConfig := api.Config{Address: target}
+
+		if tlsConfig != nil && tlsConfig.Enabled {
+			tlsClientConfig := &tls.Config{
+				ServerName:         tlsConfig.ServerName,
+				InsecureSkipVerify: tlsConfig.InsecureSkipVerify,
+				MinVersion:         tls.VersionTLS12,
+			}
+
+			if tlsConfig.CertFile != "" && tlsConfig.KeyFile != "" {
+				tlsClientConfig.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+					cert, err := tls.LoadX509KeyPair(tlsConfig.CertFile, tlsConfig.KeyFile)
+					if err != nil {
+						return nil, fmt.Errorf("failed to load client certificates: %w", err)
+					}
+					return &cert, nil
+				}
+			}
+
+			if tlsConfig.CAFile != "" {
+				caCert, err := os.ReadFile(tlsConfig.CAFile)
+				if err != nil {
+					return fmt.Errorf("failed to read CA file: %w", err)
+				}
+				caCertPool := x509.NewCertPool()
+				if !caCertPool.AppendCertsFromPEM(caCert) {
+					return fmt.Errorf("failed to parse CA certificate")
+				}
+				tlsClientConfig.RootCAs = caCertPool
+			}
+
+			clientConfig.RoundTripper = &http.Transport{
+				TLSClientConfig: tlsClientConfig,
+			}
+		}
+
+		client, err := api.NewClient(clientConfig)
 		if err != nil {
 			return err
 		}
