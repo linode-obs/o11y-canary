@@ -90,9 +90,16 @@ Contributions welcome! Make sure to `pre-commit install`.
 sudo docker compose up -d --build --force-recreate
 ```
 
-Then access the [VictoriaMetrics UI](http://localhost:8428/vmui). Canary metrics will appear under `o11y_canary_canaried_metric_total`.
+Then access the [VictoriaMetrics UI](http://localhost:8428/vmui). Canaried metrics will appear under `o11y_canary_canaried_metric_total`. Note that the metrics *of* the canary itself will not be in VictoriaMetrics. They can be found locally with:
 
-[otel-tui](https://github.com/ymtdzzz/otel-tui) is used to view metrics and traces. Run `sudo docker attach otel-tui` to use it.
+```console
+curl -s $(sudo docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' o11y-canary-o11y-canary-1):8080/metrics
+
+# or otel-tui
+sudo docker attach otel-tui
+```
+
+[otel-tui](https://github.com/ymtdzzz/otel-tui) is used to view metrics and traces of the canary itself. Run `sudo docker attach otel-tui` to use it.
 
 ### Testing
 
