@@ -33,23 +33,7 @@ The following Prometheus metrics are instrumented by o11y-canary:
 
 ## Config
 
-```yaml
-canary:
-  my_canary_1:
-    type: metrics # only OTLP metrics supported right now
-    ingest:
-      - otel-collector:4317
-      # TODO - TLS settings
-    query:
-      - http://vm-singleton:8428
-      # TODO - TLS settings
-    additional_labels:
-      environment: staging
-    interval: 5s # how long before pushing up a new series. default 5s
-    write_timeout: 10s # time before giving up when writing the series to ingest endpoints. default 10s
-    query_timeout: 10s # time before giving up querying the series from query endpoints. default 10s
-    max_active_canaried_series: 50 # active time series sent out to ingest endpoint. default 50
-```
+See the [test](test) directory for example configurations including TLS options.
 
 ## Installation
 
