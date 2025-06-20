@@ -37,9 +37,9 @@ services:
       - '-tlsCertFile=/etc/certs/cert.pem'
       - '-tlsKeyFile=/etc/certs/key.pem'
   # annoying that it mucks up the terminal stdin
-  # oteltui:
-  #   image: ymtdzzz/otel-tui:v0.5.2
-  #   container_name: otel-tui
-  #   stdin_open: true
-  #   tty: true
-  #   entrypoint: ["/otel-tui", "--grpc", "4320", "--prom-target", "o11y-canary:8080"]
+  oteltui:
+    image: ymtdzzz/otel-tui:v0.5.2
+    container_name: otel-tui
+    stdin_open: true
+    tty: true
+    entrypoint: ["/otel-tui", "--grpc", "4320", "--prom-target", "o11y-canary:8080"]

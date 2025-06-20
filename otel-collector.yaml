@@ -22,10 +22,10 @@ exporters:
       key_file: /etc/certs/key.pem
       insecure: true
 
-  # otlp/oteltui:
-  #   endpoint: http://oteltui:4320
-  #   tls:
-  #     insecure: true
+  otlp/oteltui:
+    endpoint: http://oteltui:4320
+    tls:
+      insecure: true
 
   debug:
 
