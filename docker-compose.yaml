@@ -7,6 +7,7 @@ services:
       - "8080:8080"
     volumes:
       - ./test/config.yaml:/config.yaml
+      - ./certs:/etc/certs
     command:
       - -log.level=debug
       - -config=/config.yaml
@@ -26,14 +27,18 @@ services:
       - "8428:8428"
     volumes:
       - ./vm-scrape.yaml:/scrape.yaml
+      - ./certs:/etc/certs
     command:
       - '-loggerLevel=INFO'
       - '-promscrape.config=scrape.yaml'
       - '-selfScrapeInterval=10s'
-  oteltui:
-    image: ymtdzzz/otel-tui:latest
-    container_name: otel-tui
-    stdin_open: true
-    tty: true
-    # Override entrypoint if you want use options
-    entrypoint: ["/otel-tui", "--grpc", "4320", "--enable-prom", "--prom-target", "o11y-canary:8080"]
+      - '-tls'
+      - '-tlsCertFile=/etc/certs/cert.pem'
+      - '-tlsKeyFile=/etc/certs/key.pem'
+  # annoying that it mucks up the terminal stdin
+  # oteltui:
+  #   image: ymtdzzz/otel-tui:v0.5.2
+  #   container_name: otel-tui
+  #   stdin_open: true
+  #   tty: true
+  #   entrypoint: ["/otel-tui", "--grpc", "4320", "--prom-target", "o11y-canary:8080"]

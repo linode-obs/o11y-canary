@@ -314,6 +314,10 @@ func main() {
 								runSpan.AddEvent("Metrics written successfully")
 							}
 
+							// Wait for write_timeout before querying
+							slog.Debug("Waiting for write_timeout before querying", "write_timeout", canaryConfig.WriteTimeout)
+							time.Sleep(canaryConfig.WriteTimeout)
+
 							// total + success + error is a bit verbose but comfortable
 							queriesTotal, _ := meter.Int64Counter(
 								"o11y_canary_queries_total",

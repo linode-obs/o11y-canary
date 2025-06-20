@@ -89,13 +89,19 @@ func (c *Canary) InitClient(ctx context.Context, res *resource.Resource, target 
 	}
 
 	// stats handler provides automatic grpc (rpc_) metrics
+	slog.Debug("Setting up gRPC client", "target", target, "tls_enabled", tlsConfig != nil && tlsConfig.Enabled)
+	if tlsConfig != nil && tlsConfig.Enabled {
+		slog.Debug("gRPC TLS config", "server_name", tlsConfig.ServerName, "insecure_skip_verify", tlsConfig.InsecureSkipVerify, "cert_file", tlsConfig.CertFile, "key_file", tlsConfig.KeyFile, "ca_file", tlsConfig.CAFile)
+	}
 	conn, err := grpc.NewClient(target,
 		grpc.WithTransportCredentials(creds),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 	)
 	if err != nil {
+		slog.Error("Failed to create gRPC connection", "target", target, "error", err)
 		return nil, nil, nil, fmt.Errorf("failed to create gRPC connection: %v", err)
 	}
+	slog.Debug("gRPC client connection established", "target", target)
 
 	// TODO - dynamic CLI flags for connection, target, etc
 	meterProvider, err := otelsetup.InitOTLPMeterProvider(ctx, res, conn, timeout)
@@ -209,14 +215,18 @@ func (c *Canary) Query(ctx context.Context, queryTargets []string, requestID str
 		defer cancel()
 
 		// discard result, just want to make sure we can query
-		_, warnings, err := api.Query(queryCtx, query, time.Now())
+		result, warnings, err := api.Query(queryCtx, query, time.Now())
 		if err != nil {
 			return err
 		}
 		if len(warnings) > 0 {
 			slog.Info("Warning when querying target", "target", target, "canary_request_id", requestID, "warnings", warnings)
 		}
-		slog.Debug("Query successful", "target", target, "canary_request_id", requestID)
+		if result == nil || result.String() == "" {
+			slog.Warn("Metric not found in query result", "target", target, "canary_request_id", requestID)
+			return fmt.Errorf("metric not found in query result for target %s with request ID %s", target, requestID)
+		}
+		slog.Debug("Query successful", "target", target, "canary_request_id", requestID, "result", result.String())
 
 		// TODO - return error and metrics for failed writes better. also return error + metric for timeouts
 	}

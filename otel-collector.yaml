@@ -13,7 +13,7 @@ extensions:
 
 exporters:
   otlphttp/victoriametrics:
-    endpoint: http://vm-singleton:8428/opentelemetry
+    endpoint: https://vm-singleton:8428/opentelemetry
     compression: gzip
     encoding: proto
     tls:

@@ -74,7 +74,7 @@ Contributions welcome! Make sure to `pre-commit install`.
 sudo docker compose up -d --build --force-recreate
 ```
 
-Then access the [VictoriaMetrics UI](http://localhost:8428/vmui). Canaried metrics will appear under `o11y_canary_canaried_metric_total`. Note that the metrics *of* the canary itself will not be in VictoriaMetrics. They can be found locally with:
+Then access the [VictoriaMetrics UI](https://localhost:8428/vmui). Canaried metrics will appear under `o11y_canary_canaried_metric_total`. Note that the metrics *of* the canary itself will not be in VictoriaMetrics. They can be found locally with:
 
 ```console
 curl -s $(sudo docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' o11y-canary-o11y-canary-1):8080/metrics
@@ -88,3 +88,7 @@ sudo docker attach otel-tui
 ### Testing
 
 [Venom](https://github.com/ovh/venom) is used for integration tests. Run `sudo venom run tests.yml` to spin up the docker compose stack.
+
+#### Local TLS/mTLS Testing with mkcert
+
+Local certs are generated for mTLS testing with [mkcert](https://github.com/FiloSottile/mkcert) (used by o11y-canary and VictoriaMetrics for mTLS).

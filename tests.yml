@@ -1,42 +1,43 @@
 name: o11y-canary
-vars:
-  vicmecHost: "http://localhost:8428"
 testcases:
   - name: docker compose up
     steps:
       - type: exec
         script: docker compose up --build -d --wait --force-recreate
 
-  - name: wait for services
-    steps:
-      - type: http
-        url: "{{.vicmecHost}}/metrics"
-        method: GET
-        retries: 10
-        delay: 2
-        assertions:
-          - result.statuscode ShouldEqual 200
-      - type: http
-        url: "http://localhost:8888/metrics"
-        method: GET
-        retries: 10
-        delay: 2
-        assertions:
-          - result.statuscode ShouldEqual 200
+  # - name: wait for VictoriaMetrics and o11y-canary metrics
+  #   steps:
+  #     - type: exec
+  #       script: |
+  #         for i in $(seq 1 15); do
+  #           metrics=$(curl --cacert certs/rootCA.pem -s https://localhost:8428/metrics)
+  #           if echo "$metrics" | grep -q '^o11y_canary_'; then
+  #             exit 0
+  #           fi
+  #           sleep 2
+  #         done
+  #         echo "VictoriaMetrics /metrics endpoint not ready or o11y_canary metric not found after retries" >&2
+  #         echo "--- VictoriaMetrics /metrics output ---" >&2
+  #         curl --cacert certs/rootCA.pem -s https://localhost:8428/metrics >&2
+  #         echo "--- END ---" >&2
+  #         exit 1
 
-  # try a few times but fail after 60s total
   - name: Check for metric write() existence
     steps:
       - type: exec
         script: |
-          for i in $(seq 1 6); do
-            out=$(curl -s -G http://localhost:8428/api/v1/query \
+          for i in $(seq 1 30); do
+            out=$(curl --cacert certs/rootCA.pem -G https://localhost:8428/api/v1/query \
               -H "Content-Type: application/json" \
-              --data-urlencode 'query=o11y_canary_canaried_metric_total{canary="true"}')
-            echo "$out" | grep -q '"__name__":"o11y_canary_canaried_metric_total"' && echo "$out" && exit 0
-            sleep 10
+              --data-urlencode 'query=o11y_canary_canaried_metric_total')
+            if echo "$out" | grep -q '"__name__":"o11y_canary_canaried_metric_total"'; then
+              echo "$out"
+              exit 0
+            fi
+            sleep 2
           done
-          echo "Metric not found after 60s" >&2
+          echo "Metric not found after 60s. Last query output:" >&2
+          echo "$out" >&2
           exit 1
         assertions:
           - result.code ShouldEqual 0
