@@ -20,6 +20,7 @@ services:
       - 8888:8888
     volumes:
       - ./otel-collector.yaml:/etc/otel-collector.yaml
+      - ./certs:/etc/certs
     command: ["--config=file:/etc/otel-collector.yaml"]
   vm-singleton:
     image: victoriametrics/victoria-metrics:v1.101.0
