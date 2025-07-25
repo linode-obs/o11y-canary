@@ -134,6 +134,7 @@ func (c *Canary) InitClient(ctx context.Context, res *resource.Resource, target 
 }
 
 // Write performs a write operation for a counter
+// Only records the canaried metric (o11y_canary_canaried_metric_total) via the OTLP meter
 func (c *Canary) Write(ctx context.Context, meterProvider metric.MeterProvider, targets []string, gauge metric.Float64Gauge, requestID string, writeTimeout time.Duration, wg *sync.WaitGroup) (err error) {
 	defer wg.Done()
 	done := make(chan error, 1)
@@ -153,7 +154,7 @@ func (c *Canary) Write(ctx context.Context, meterProvider metric.MeterProvider, 
 
 			gauge.Record(ctx, randomValue, metric.WithAttributes(labels...))
 
-			slog.Debug("Writing metric", "ingest", target, "canary_request_id", requestID)
+			slog.Debug("Writing canaried metric", "ingest", target, "canary_request_id", requestID)
 
 			// Force flush metrics after recording
 			if flusher, ok := meterProvider.(interface{ ForceFlush(context.Context) error }); ok {
@@ -189,6 +190,7 @@ func (c *Canary) Query(ctx context.Context, queryTargets []string, requestID str
 	defer wg.Done()
 	done := make(chan error, 1)
 	go func() {
+		var lastErr error
 		for _, target := range queryTargets {
 			slog.Debug("Querying metric", "target", target, "canary_request_id", requestID)
 
@@ -247,21 +249,22 @@ func (c *Canary) Query(ctx context.Context, queryTargets []string, requestID str
 			// discard result, just want to make sure we can query
 			result, warnings, err := api.Query(queryCtx, query, time.Now())
 			if err != nil {
-				done <- err
-				return
+				lastErr = err
+				continue
 			}
 			if len(warnings) > 0 {
 				slog.Info("Warning when querying target", "target", target, "canary_request_id", requestID, "warnings", warnings)
 			}
 			if result == nil || result.String() == "" {
 				slog.Warn("Metric not found in query result", "target", target, "canary_request_id", requestID)
-				done <- fmt.Errorf("metric not found in query result for target %s with request ID %s", target, requestID)
-				return
+				lastErr = fmt.Errorf("metric not found in query result for target %s with request ID %s", target, requestID)
+				continue
 			}
 			slog.Debug("Query successful", "target", target, "canary_request_id", requestID, "result", result.String())
 
 			// TODO - return error and metrics for failed writes better. also return error + metric for timeouts
 		}
+		done <- lastErr
 	}()
 
 	select {
@@ -272,5 +275,8 @@ func (c *Canary) Query(ctx context.Context, queryTargets []string, requestID str
 		c.InsertionTimestamps.Store(requestID, err)
 		slog.Error("Query timeout", "canary_request_id", requestID, "timeout", queryTimeout)
 		return err
+	case <-done:
+		return nil
 	}
+
 }
