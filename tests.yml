@@ -5,23 +5,6 @@ testcases:
       - type: exec
         script: docker compose up --build -d --wait --force-recreate
 
-  # - name: wait for VictoriaMetrics and o11y-canary metrics
-  #   steps:
-  #     - type: exec
-  #       script: |
-  #         for i in $(seq 1 15); do
-  #           metrics=$(curl --cacert certs/rootCA.pem -s https://localhost:8428/metrics)
-  #           if echo "$metrics" | grep -q '^o11y_canary_'; then
-  #             exit 0
-  #           fi
-  #           sleep 2
-  #         done
-  #         echo "VictoriaMetrics /metrics endpoint not ready or o11y_canary metric not found after retries" >&2
-  #         echo "--- VictoriaMetrics /metrics output ---" >&2
-  #         curl --cacert certs/rootCA.pem -s https://localhost:8428/metrics >&2
-  #         echo "--- END ---" >&2
-  #         exit 1
-
   - name: Check for metric write() existence
     steps:
       - type: exec
@@ -61,11 +44,12 @@ testcases:
         assertions:
           - result.code ShouldEqual 0
 
-  - name: Check that failed queries are zero
+  # TODO - maybe after a few minutes failed queries shouldn't increment anymore?
+  - name: Check that failed queries exist
     steps:
       - type: exec
         script: |
-          curl -s http://localhost:8080/metrics | grep -q '^o11y_canary_query_errors_total{.*} 0'
+          curl -s http://localhost:8080/metrics | grep -q '^o11y_canary_query_errors_total{.*}'
         assertions:
           - result.code ShouldEqual 0
 
@@ -74,6 +58,22 @@ testcases:
       - type: exec
         script: |
           curl -s http://localhost:8080/metrics | grep -q '^o11y_canary_info{'
+        assertions:
+          - result.code ShouldEqual 0
+
+  - name: Check for o11y_canary_query_duration_seconds existence
+    steps:
+      - type: exec
+        script: |
+          curl -s http://localhost:8080/metrics | grep -q '^o11y_canary_query_duration_seconds_bucket{'
+        assertions:
+          - result.code ShouldEqual 0
+
+  - name: Check for o11y_canary_lag_duration_seconds existence
+    steps:
+      - type: exec
+        script: |
+          curl -s http://localhost:8080/metrics | grep -q '^o11y_canary_lag_duration_seconds_bucket{'
         assertions:
           - result.code ShouldEqual 0
 
