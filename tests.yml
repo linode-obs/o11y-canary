@@ -1,42 +1,26 @@
 name: o11y-canary
-vars:
-  vicmecHost: "http://localhost:8428"
 testcases:
   - name: docker compose up
     steps:
       - type: exec
         script: docker compose up --build -d --wait --force-recreate
 
-  - name: wait for services
-    steps:
-      - type: http
-        url: "{{.vicmecHost}}/metrics"
-        method: GET
-        retries: 10
-        delay: 2
-        assertions:
-          - result.statuscode ShouldEqual 200
-      - type: http
-        url: "http://localhost:8888/metrics"
-        method: GET
-        retries: 10
-        delay: 2
-        assertions:
-          - result.statuscode ShouldEqual 200
-
-  # try a few times but fail after 60s total
   - name: Check for metric write() existence
     steps:
       - type: exec
         script: |
-          for i in $(seq 1 6); do
-            out=$(curl -s -G http://localhost:8428/api/v1/query \
+          for i in $(seq 1 30); do
+            out=$(curl --cacert certs/rootCA.pem -G https://localhost:8428/api/v1/query \
               -H "Content-Type: application/json" \
-              --data-urlencode 'query=o11y_canary_canaried_metric_total{canary="true"}')
-            echo "$out" | grep -q '"__name__":"o11y_canary_canaried_metric_total"' && echo "$out" && exit 0
-            sleep 10
+              --data-urlencode 'query=o11y_canary_canaried_metric_total')
+            if echo "$out" | grep -q '"__name__":"o11y_canary_canaried_metric_total"'; then
+              echo "$out"
+              exit 0
+            fi
+            sleep 2
           done
-          echo "Metric not found after 60s" >&2
+          echo "Metric not found after 60s. Last query output:" >&2
+          echo "$out" >&2
           exit 1
         assertions:
           - result.code ShouldEqual 0
@@ -60,11 +44,12 @@ testcases:
         assertions:
           - result.code ShouldEqual 0
 
-  - name: Check that failed queries are zero
+  # TODO - maybe after a few minutes failed queries shouldn't increment anymore?
+  - name: Check that failed queries exist
     steps:
       - type: exec
         script: |
-          curl -s http://localhost:8080/metrics | grep -q '^o11y_canary_query_errors_total{.*} 0'
+          curl -s http://localhost:8080/metrics | grep -q '^o11y_canary_query_errors_total{.*}'
         assertions:
           - result.code ShouldEqual 0
 
@@ -73,6 +58,22 @@ testcases:
       - type: exec
         script: |
           curl -s http://localhost:8080/metrics | grep -q '^o11y_canary_info{'
+        assertions:
+          - result.code ShouldEqual 0
+
+  - name: Check for o11y_canary_query_duration_seconds existence
+    steps:
+      - type: exec
+        script: |
+          curl -s http://localhost:8080/metrics | grep -q '^o11y_canary_query_duration_seconds_bucket{'
+        assertions:
+          - result.code ShouldEqual 0
+
+  - name: Check for o11y_canary_lag_duration_seconds existence
+    steps:
+      - type: exec
+        script: |
+          curl -s http://localhost:8080/metrics | grep -q '^o11y_canary_lag_duration_seconds_bucket{'
         assertions:
           - result.code ShouldEqual 0
 

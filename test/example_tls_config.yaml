@@ -1,0 +1,29 @@
+canary:
+  my_canary_1:
+    type: metrics
+    # TLS config applies to all ingest and query endpoints unless overridden
+    tls:
+      enabled: true
+      ca_file: /path/to/ca.crt
+      cert_file: /path/to/client.crt
+      key_file: /path/to/client.key
+      server_name: otel-collector
+    ingest:
+      - url: otel-collector:4317
+      - url: otel-collector-two:4317
+        tls:
+          enabled: true
+          ca_file: /path/to/other-ca.crt
+          cert_file: /path/to/other-client.crt
+          key_file: /path/to/other-client.key
+          server_name: otel-collector-two
+    query:
+      - url: http://vm-singleton:8428
+        tls:
+          enabled: false
+    additional_labels:
+      environment: staging
+    interval: 5s
+    write_timeout: 10s
+    query_timeout: 60s
+    max_active_canaried_series: 5

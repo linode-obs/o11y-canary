@@ -5,11 +5,17 @@ canary:
     # also grpc vs http
     ingest:
     # TODO - have option to write internal metrics about canary to same ingestion endpoint
-      - otel-collector:4317
-      # TODO - TLS settings
+      - url: otel-collector:4317
+        tls:
+          enabled: false
     query:
-      - http://vm-singleton:8428
-      # TODO - TLS settings?
+      - url: https://vm-singleton:8428
+        tls:
+          enabled: true
+          ca_file: /etc/certs/rootCA.pem
+          cert_file: /etc/certs/cert.pem
+          key_file: /etc/certs/key.pem
+          server_name: vm-singleton
     additional_labels:
       environment: staging
     # TODO - break up interval into ingest and query?
