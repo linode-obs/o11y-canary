@@ -29,10 +29,7 @@ changelog:
       - '^test:'
 
 dockers:
-  # build latest and specific tag version images
-  # https://goreleaser.com/cookbooks/multi-platform-docker-images/#other-things-to-pay-attention-to
   - image_templates:
-      # https://goreleaser.com/cookbooks/override-image-name/
       - "ghcr.io/linode-obs/{{ .ProjectName }}:{{ .Tag }}"
       - "ghcr.io/linode-obs/{{ .ProjectName }}:{{ .Tag }}-amd64"
     use: buildx
@@ -49,6 +46,9 @@ dockers:
     - "--label=org.opencontainers.image.licenses=MIT"
     - "--platform=linux/amd64"
     dockerfile: "Dockerfile"
+    extra_files:
+      - go.mod
+      - go.sum
   - image_templates:
       - "ghcr.io/linode-obs/{{ .ProjectName }}:{{ .Tag }}-linux-arm64"
     use: buildx
@@ -65,3 +65,7 @@ dockers:
     - "--label=org.opencontainers.image.licenses=MIT"
     - "--platform=linux/arm64"
     dockerfile: "Dockerfile"
+    extra_files:
+      - go.mod
+      - go.sum
+
