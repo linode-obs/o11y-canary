@@ -3,6 +3,7 @@ before:
   hooks:
     - go mod tidy
     - go test -v ./...
+
 builds:
   - env:
       - CGO_ENABLED=0
@@ -16,26 +17,17 @@ builds:
     ldflags:
       - -X main.Version={{ .Version }} -X main.Commit={{ .Commit }} -X main.BuildDate={{ .CommitDate }}
     main: ./cmd/main.go
-archives:
-  - name_template: >-
-      {{ .ProjectName }}_
-      {{- title .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "386" }}i386
-      {{- else if eq .Arch "darwin" }}Darwin
-      {{- else if eq .Arch "linux" }}Linux
-      {{- else if eq .Arch "windows" }}Windows
-      {{- else }}{{ .Arch }}{{ end }}
-checksum:
-  name_template: 'checksums.txt'
+
 snapshot:
   name_template: "{{ incpatch .Version }}-next"
+
 changelog:
   sort: asc
   filters:
     exclude:
       - '^docs:'
       - '^test:'
+
 dockers:
   # build latest and specific tag version images
   # https://goreleaser.com/cookbooks/multi-platform-docker-images/#other-things-to-pay-attention-to
@@ -73,33 +65,3 @@ dockers:
     - "--label=org.opencontainers.image.licenses=MIT"
     - "--platform=linux/arm64"
     dockerfile: "Dockerfile"
-nfpms:
-  -  id: default
-     formats:
-      - deb
-      - rpm
-     package_name: "o11y-canary"
-     section: "default"
-     priority: "extra"
-     replaces: []
-     dependencies: []
-     recommends: []
-     suggests: []
-     conflicts: []
-     maintainer: "SRE O11Y support@linode.com"
-     description: |
-       o11y platform canary
-     homepage: "https://github.linode.com/linode-obs/{{ .ProjectName }}"
-     license: "MIT"
-     contents:
-     # provided by goreleaser
-     - src: ./dist/o11y-canary_linux_amd64_v1/o11y-canary
-       dst: /usr/local/bin/o11y-canary
-     - src: ./nfpm/systemd/o11y-canary.service
-       dst: /etc/systemd/system/o11y-canary.service
-       type: config
-     - src: ./nfpm/etc/default/o11y-canary
-       dst: /etc/default/o11y-canary
-       type: config
-     scripts:
-        postinstall: ./nfpm/scripts/postinstall.sh
