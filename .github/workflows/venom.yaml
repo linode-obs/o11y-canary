@@ -19,4 +19,8 @@ jobs:
         run: curl https://github.com/ovh/venom/releases/download/v1.2.0/venom.linux-amd64 -L -o /usr/local/bin/venom && chmod +x /usr/local/bin/venom
 
       - name: Run test
-        run: venom run tests.yml
+        run: sudo venom run tests.yml
+
+      - name: Output venom log
+        if: always()
+        run: cat venom.log
