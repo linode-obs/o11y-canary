@@ -32,3 +32,4 @@ dist/
 
 # venom logs
 venom*log
+tests.*json
