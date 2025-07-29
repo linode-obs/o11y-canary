@@ -36,5 +36,7 @@ jobs:
           node-version: '20'
       - uses: actions/checkout@v4
 
-      - name: Run pre-commit
+      - name: Run pre-commit (skip golangci-lint)
         uses: pre-commit/action@v3.0.0
+        env: # https://github.com/pre-commit/pre-commit/issues/2247#issuecomment-1042438457
+          SKIP: golangci-lint, golangci-lint-full, golangci-lint-config-verify
