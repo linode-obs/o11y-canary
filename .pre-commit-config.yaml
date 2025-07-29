@@ -24,9 +24,6 @@ repos:
     #
     #
     #
-    # Style Checkers
-    #
-    -   id: go-lint
     #
     # GolangCI-Lint
     # local hook from https://github.com/golangci/golangci-lint/blob/adbdfdb288e939a175182b7a12b7555215ce98b2/.pre-commit-hooks.yaml
