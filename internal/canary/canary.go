@@ -107,7 +107,7 @@ func (c *Canary) InitClient(ctx context.Context, res *resource.Resource, target 
 	meterProvider, err := otelsetup.InitOTLPMeterProvider(ctx, res, conn, timeout)
 	if err != nil {
 		slog.Error("Failed to create meter provider", "error", err)
-		conn.Close()
+		err = conn.Close()
 		return nil, nil, nil, err
 	}
 
@@ -116,7 +116,7 @@ func (c *Canary) InitClient(ctx context.Context, res *resource.Resource, target 
 		if shutdownErr := meterProvider.Shutdown(ctx); shutdownErr != nil {
 			slog.Error("Failed to shut down meter provider", "target", target, "error", shutdownErr)
 		}
-		conn.Close()
+		err = conn.Close()
 	}
 
 	canaryMeter := meterProvider.Meter("o11y-canary-exported-data")

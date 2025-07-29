@@ -66,9 +66,9 @@ func main() {
 
 	file, err := os.Open(*configFileFlag)
 	if err != nil {
-		slog.Error("Error decoding YAML", "error", err)
+		log.Fatal(err)
 	}
-	defer file.Close()
+	defer file.Close() //nolint:errcheck
 
 	var canaryConfig config.CanariesConfig
 	decoder := yaml.NewDecoder(file)
