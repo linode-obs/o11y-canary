@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: o11y-canary
+  labels:
+    app: o11y-canary
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: o11y-canary
+  template:
+    metadata:
+      labels:
+        app: o11y-canary
+    spec:
+      containers:
+        - name: o11y-canary
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: certs
+              mountPath: /certs
+          args: ["--config", "/config/config.yaml"]
+      volumes:
+        - name: config
+          configMap:
+            name: o11y-canary-config
+        - name: certs
+          secret:
+            secretName: {{ .Values.certSecretName }}
+      {{- if .Values.antiAffinity.enabled }}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: o11y-canary
+              topologyKey: {{ .Values.antiAffinity.topologyKey }}
+      {{- end }}

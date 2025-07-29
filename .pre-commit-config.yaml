@@ -58,3 +58,11 @@ repos:
       files: '\.golangci\.(?:yml|yaml|toml|json)'
       language: golang
       pass_filenames: false
+
+-   repo: https://github.com/gruntwork-io/pre-commit
+    rev: v0.1.30
+    hooks:
+      - id: helmlint
+        name: helmlint
+        description: Lint Helm charts using helm lint
+        files: ^helm/o11y-canary/

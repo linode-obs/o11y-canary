@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: o11y-canary-config
+  labels:
+    app: o11y-canary
+data:
+  config.yaml: |-
+    {{ .Values.canaryConfig | nindent 4 }}
