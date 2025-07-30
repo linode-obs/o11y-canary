@@ -1,0 +1,6 @@
+{{- if .Values.extraObjects }}
+{{- range $obj := .Values.extraObjects }}
+---
+{{ tpl $obj $ }}
+{{- end }}
+{{- end }}

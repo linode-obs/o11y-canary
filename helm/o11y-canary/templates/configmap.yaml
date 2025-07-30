@@ -6,4 +6,4 @@ metadata:
     app: o11y-canary
 data:
   config.yaml: |-
-    {{ .Values.canaryConfig | nindent 4 }}
+    {{- .Values.canaryConfig | nindent 4 }}
