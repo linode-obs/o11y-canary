@@ -1,0 +1,88 @@
+replicaCount: 1
+image:
+  repository: ghcr.io/linode-obs/o11y-canary
+  tag: v0.1.0
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+
+# Single cert secret for all endpoints
+# TODO - expand this?
+# You must create this secret yourself!
+# The secret must contain keys: ca.crt, tls.crt, tls.key
+certSecretName: o11y-canary-tls
+vaultCertIssuer: vault-production-o11y-canary
+certificate:
+  commonName: o11y-canary.example.com
+
+canaryConfig: |-
+  canary:
+    my_canary_1:
+      type: metrics
+      tls:
+        enabled: true
+        ca_file: /certs/ca.crt
+        cert_file: /certs/tls.crt
+        key_file: /certs/tls.key
+        server_name: otel-collector
+      ingest:
+        - url: otel-collector:4317
+      query:
+        - url: http://vm-singleton:8428
+          tls:
+            enabled: false
+      additional_labels:
+        environment: staging
+      interval: 5s
+      write_timeout: 10s
+      query_timeout: 60s
+      max_active_canaried_series: 5
+
+antiAffinity:
+  enabled: false
+  topologyKey: "kubernetes.io/hostname"
+
+serviceMonitor:
+  enabled: true
+  labels: {}
+  metricRelabelings: []
+  # Example:
+  # metricRelabelings:
+  #   - sourceLabels: [__name__]
+  #     regex: 'o11y_canary_.*'
+  #     action: keep
+
+# List of extra secrets to mount. Each item should have a name and secretName.
+extraSecrets: []
+# Example:
+# extraSecrets:
+#   - name: extra-secret
+#     secretName: your-extra-secret
+
+# List of extra Kubernetes objects to create (YAML manifests as strings or objects)
+extraObjects: []
+# Example:
+# extraObjects:
+#   - |
+#     apiVersion: v1
+#     kind: Secret
+#     metadata:
+#       name: my-extra-secret
+#     type: Opaque
+#     data:
+#       key: dmFsdWU=
+#   - |
+#     apiVersion: v1
+#     kind: ConfigMap
+#     metadata:
+#       name: my-extra-config
+#     data:
+#       foo: bar
+
+labels: {}
+# Example:
+# labels:
+#   environment: staging
+#   team: observability

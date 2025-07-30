@@ -1,0 +1,23 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: o11y-canary
+  labels:
+    app: o11y-canary
+    {{- with .Values.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app: o11y-canary
+  endpoints:
+    - port: http
+      interval: 30s
+      path: /metrics
+      {{- if .Values.serviceMonitor.metricRelabelings }}
+      metricRelabelings:
+        {{- toYaml .Values.serviceMonitor.metricRelabelings | nindent 8 }}
+      {{- end }}
+  namespaceSelector:
+    any: true

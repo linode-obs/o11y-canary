@@ -1,0 +1,18 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "o11y-canary.fullname" . }}-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "o11y-canary.labels" . | nindent 4 }}
+spec:
+  secretName: {{ .Values.certSecretName | default (printf "%s-tls" (include "o11y-canary.fullname" .)) }}
+  issuerRef:
+    name: {{ .Values.vaultCertIssuer }}
+    kind: ClusterIssuer
+  commonName: "{{ .Values.certificate.commonName }}"
+  dnsNames:
+    - "{{ .Values.certificate.commonName }}"
+  privateKey:
+    algorithm: RSA
+    size: 4096

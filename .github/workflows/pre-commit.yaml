@@ -1,0 +1,42 @@
+name: pre-commit
+
+on:
+  push:
+    tags:
+      - v*
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: setup env
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y curl gpg
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+      # need curl and gpg for this to work, installed in setupenv
+      # https://mise.jdx.dev/continuous-integration.html#github-actions
+      - name: Setup mise to install dependencies in .tool-versions
+        uses: jdx/mise-action@v2
+        with:
+          version: 2025.7.11
+          install: true
+          cache: true
+          experimental: true
+          log_level: debug
+
+      - name: Setup node dependencies
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/checkout@v4
+
+      - name: Run pre-commit (skip golangci-lint)
+        uses: pre-commit/action@v3.0.0
+        env: # https://github.com/pre-commit/pre-commit/issues/2247#issuecomment-1042438457
+          SKIP: golangci-lint, golangci-lint-full, golangci-lint-config-verify
