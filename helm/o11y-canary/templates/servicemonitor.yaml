@@ -1,7 +1,7 @@
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: o11y-canary
+  name: {{ include "o11y-canary.fullname" . }}-sm
   labels:
     app: o11y-canary
     {{- with .Values.serviceMonitor.labels }}
@@ -13,11 +13,12 @@ spec:
       app: o11y-canary
   endpoints:
     - port: http
-      interval: 30s
-      path: /metrics
+      interval: {{ .Values.serviceMonitor.interval | default "30s" }}
+      path: {{ .Values.serviceMonitor.path | default "/metrics" }}
       {{- if .Values.serviceMonitor.metricRelabelings }}
       metricRelabelings:
         {{- toYaml .Values.serviceMonitor.metricRelabelings | nindent 8 }}
       {{- end }}
   namespaceSelector:
-    any: true
+    matchNames:
+      - {{ .Release.Namespace }}
