@@ -8,13 +8,13 @@ service:
   type: ClusterIP
   port: 8080
 
-# Single cert secret for all endpoints
-# TODO - expand this?
-# You must create this secret yourself!
-# The secret must contain keys: ca.crt, tls.crt, tls.key
-certSecretName: o11y-canary-tls
-vaultCertIssuer: vault-production-o11y-canary
 certificate:
+  enabled: true  # Set to false to disable cert-manager Certificate object
+  # Name of the secret to use for TLS certificates
+  certSecretName: o11y-canary-tls
+  # Name of the cert-manager issuer to use
+  vaultCertIssuer: vault-production-o11y-canary
+  # Common name for the certificate
   commonName: o11y-canary.example.com
 
 canaryConfig: |-
