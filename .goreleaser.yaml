@@ -45,7 +45,7 @@ dockers:
     - "--label=org.opencontainers.image.description='o11y platform canary'"
     - "--label=org.opencontainers.image.licenses=MIT"
     - "--platform=linux/amd64"
-    dockerfile: "Dockerfile"
+    dockerfile: "Dockerfile_goreleaser"
     extra_files:
       - go.mod
       - go.sum
@@ -64,7 +64,7 @@ dockers:
     - "--label=org.opencontainers.image.description='o11y platform canary'"
     - "--label=org.opencontainers.image.licenses=MIT"
     - "--platform=linux/arm64"
-    dockerfile: "Dockerfile"
+    dockerfile: "Dockerfile_goreleaser"
     extra_files:
       - go.mod
       - go.sum

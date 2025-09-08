@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "o11y-canary.fullname" . }}-config
+  labels:
+    app: o11y-canary
+    release: {{ .Release.Name }}
+    namespace: {{ .Release.Namespace }}
+data:
+  config.yaml: |-
+    {{- toYaml .Values.canary | nindent 4 }}

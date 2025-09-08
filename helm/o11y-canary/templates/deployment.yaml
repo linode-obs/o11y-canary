@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "o11y-canary.fullname" . }}
+  labels:
+    app: o11y-canary
+    release: {{ .Release.Name }}
+    namespace: {{ .Release.Namespace }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: o11y-canary
+  template:
+    metadata:
+      labels:
+        app: o11y-canary
+        release: {{ .Release.Name }}
+        namespace: {{ .Release.Namespace }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name | default "o11y-canary-sa" }}
+      imagePullSecrets:
+        {{- range .Values.imagePullSecrets }}
+        - name: {{ . }}
+        {{- end }}
+      containers:
+        - name: o11y-canary
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: certs
+              mountPath: /certs
+          args: ["--config", "/config/config.yaml"]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "o11y-canary.fullname" . }}-config
+        - name: certs
+          secret:
+            secretName: {{ .Values.certificate.certSecretName | default (printf "%s-tls" (include "o11y-canary.fullname" .)) }}
+        {{- range .Values.extraSecrets }}
+        - name: {{ .name }}
+          secret:
+            secretName: {{ .secretName }}
+        {{- end }}
+      {{- if .Values.antiAffinity.enabled }}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: o11y-canary
+              topologyKey: {{ .Values.antiAffinity.topologyKey }}
+      {{- end }}
